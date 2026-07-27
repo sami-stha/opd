@@ -15,6 +15,11 @@
       .patient-info-box .label { color: var(--text-muted); font-size: 0.75rem; }
       .patient-history-panel { background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; max-height: 280px; overflow-y: auto; font-size: 0.85rem; }
       .history-visit { border-bottom: 1px dashed var(--border); padding-bottom: 0.75rem; margin-bottom: 0.75rem; }
+      .history-visit:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+      .history-summary-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.75rem 1rem; background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1rem; }
+      .history-summary-bar p { margin: 0; font-size: 0.875rem; color: var(--text-muted); }
+      #historyModal .modal-content { max-width: 720px; }
+      #historyModal .patient-history-panel { max-height: 60vh; margin-bottom: 0; }
       .prescription-slip { font-family: 'Courier New', monospace; background: #fff; color: #000; padding: 2rem; max-width: 650px; margin: 0 auto; border: 1px solid #ccc; }
       .prescription-slip .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 0.75rem; margin-bottom: 1rem; }
       .prescription-slip .info-row { display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px dashed #ccc; font-size: 0.9rem; }
@@ -40,6 +45,19 @@
           <div class="timer-display" id="consultationTimer">00:00</div>
         </div>
         <div id="consultationForm"><p style="color:var(--text-muted);">Loading consultation...</p></div>
+      </div>
+    </div>
+
+    <div id="historyModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Patient History</h3>
+          <button onclick="closeHistoryModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" id="historyModalBody"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeHistoryModal()">Close</button>
+        </div>
       </div>
     </div>
 
@@ -91,27 +109,114 @@
         };
       }
 
+      function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
       async function loadPatientHistory(tokenId) {
         patientHistoryData = null;
         const res = await API.doctorPatientHistory(tokenId);
         if (res.success) patientHistoryData = res;
+        updateHistorySummaryBar();
       }
 
-      function renderPatientHistoryPanel() {
-        if (!patientHistoryData) return '<div class="patient-history-panel"><em>Loading patient history...</em></div>';
-        const visits = patientHistoryData.history || [];
-        if (!visits.length) {
-          return `<div class="patient-history-panel"><strong>No prior visit history on record.</strong>${
-            patientHistoryData.prior_visit_count
-              ? ` (${patientHistoryData.prior_visit_count} earlier visit(s) not detailed here.)`
-              : ''
-          }</div>`;
+      function updateHistorySummaryBar() {
+        const el = document.getElementById('historySummaryText');
+        if (!el) return;
+        if (!patientHistoryData) {
+          el.textContent = 'Loading history...';
+          return;
         }
-        return `<div class="patient-history-panel"><strong>Patient History</strong> (${patientHistoryData.prior_visit_count} prior visits)
-          ${visits.map(v => `<div class="history-visit"><strong>${v.date}</strong> · ${v.token_number} · ${v.doctor_name}
-            ${v.consultation?.diagnosis ? `<div><strong>Diagnosis:</strong> ${v.consultation.diagnosis}</div>` : ''}
-            ${v.prescriptions?.length ? `<div><strong>Rx:</strong> ${v.prescriptions.map(p => p.medicine_name).join(', ')}</div>` : ''}
-          </div>`).join('')}</div>`;
+        const count = patientHistoryData.prior_visit_count || 0;
+        if (count === 0) {
+          el.textContent = 'No prior visits on record for this patient.';
+        } else {
+          el.textContent = `${count} prior visit(s) on record. Open to review prescriptions, lab reports, and diagnoses.`;
+        }
+      }
+
+      function renderVisitHistoryEntry(visit) {
+        const consult = visit.consultation || {};
+        const rxList = visit.prescriptions || [];
+        const labList = visit.lab_reports || [];
+        return `
+          <div class="history-visit">
+            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+              <strong>${escapeHtml(visit.date)} · ${escapeHtml(visit.token_number)}</strong>
+              <span style="color:var(--text-muted);">${escapeHtml(visit.doctor_name)} · ${escapeHtml(visit.status)}</span>
+            </div>
+            ${visit.is_followup ? '<div style="font-size:0.8rem; color:var(--secondary);">Follow-up visit</div>' : ''}
+            ${consult.symptoms ? `<div><strong>Symptoms:</strong> ${escapeHtml(consult.symptoms)}</div>` : ''}
+            ${consult.diagnosis ? `<div><strong>Diagnosis:</strong> ${escapeHtml(consult.diagnosis)}</div>` : ''}
+            ${consult.notes ? `<div><strong>Notes:</strong> ${escapeHtml(consult.notes)}</div>` : ''}
+            ${consult.followup_date ? `<div><strong>Follow-up:</strong> ${escapeHtml(consult.followup_date)}</div>` : ''}
+            ${rxList.length ? `
+              <div style="margin-top:0.5rem;">
+                <strong>Prescriptions</strong>
+                <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
+                  ${rxList.map(p => `<li>${escapeHtml(p.medicine_name)} — ${escapeHtml(p.dosage || '')} ${escapeHtml(p.frequency || '')} ${p.duration_days ? `(${p.duration_days} days)` : ''}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            ${labList.length ? `
+              <div style="margin-top:0.5rem;">
+                <strong>Lab Reports</strong>
+                <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
+                  ${labList.map(l => `<li>${escapeHtml(l.test_name)}${l.findings ? ` — ${escapeHtml(l.findings)}` : ''}${l.report_url ? ` <a href="${escapeHtml(l.report_url)}" target="_blank" rel="noopener">View report</a>` : ''}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            ${!consult.diagnosis && !rxList.length && !labList.length ? '<div style="color:var(--text-muted);">No clinical details recorded for this visit.</div>' : ''}
+          </div>`;
+      }
+
+      function renderFullPatientHistory() {
+        if (!patientHistoryData) {
+          return '<p style="color:var(--text-muted);">Loading patient history...</p>';
+        }
+        const visits = patientHistoryData.history || [];
+        const priorCount = patientHistoryData.prior_visit_count || 0;
+        const patientLabel = PatientDisplay.label(
+          patientHistoryData.patient_name || currentPatient?.patient,
+          currentPatient?.patient_id
+        );
+        if (!visits.length) {
+          return `
+            <p style="margin:0 0 0.75rem;"><strong>${escapeHtml(patientLabel)}</strong></p>
+            <p style="color:var(--text-muted);">No prior visit history on record.${
+              priorCount ? ` (${priorCount} earlier visit(s) not detailed here.)` : ''
+            }</p>`;
+        }
+        return `
+          <p style="margin:0 0 0.75rem;">
+            <strong>${escapeHtml(patientLabel)}</strong>
+            <span style="color:var(--text-muted);"> · ${priorCount} prior visit(s)</span>
+          </p>
+          <div class="patient-history-panel">
+            ${visits.map(renderVisitHistoryEntry).join('')}
+          </div>`;
+      }
+
+      function openHistoryModal() {
+        document.getElementById('historyModalBody').innerHTML = renderFullPatientHistory();
+        document.getElementById('historyModal').classList.add('active');
+      }
+
+      function closeHistoryModal() {
+        document.getElementById('historyModal').classList.remove('active');
+      }
+
+      function renderHistorySection() {
+        const priorCount = patientHistoryData?.prior_visit_count;
+        const badge = priorCount != null ? ` (${priorCount})` : '';
+        return `
+          <div class="history-summary-bar">
+            <p id="historySummaryText">${patientHistoryData ? '' : 'Loading history...'}</p>
+            <button class="btn btn-outline" type="button" onclick="openHistoryModal()">View History${badge}</button>
+          </div>`;
       }
 
       function startTimer() {
@@ -128,7 +233,7 @@
         medicines = [];
         selectedLabTests = [];
         document.getElementById('consultationForm').innerHTML = `
-          ${renderPatientHistoryPanel()}
+          ${renderHistorySection()}
           <div class="patient-info-box">
             <div><span class="label">Patient</span><br><span class="value">${PatientDisplay.label(currentPatient.patient, currentPatient.patient_id)}</span></div>
             <div><span class="label">Token</span><br><span class="value">${currentPatient.token}</span></div>
@@ -325,6 +430,7 @@
         await loadPatientHistory(tokenId);
         await loadLabCatalog();
         renderConsultationForm();
+        updateHistorySummaryBar();
         startTimer();
       }
 

@@ -14,7 +14,7 @@ from .reception import (
 from .doctor import (
     doctor_schedule, doctor_queue, next_patient,
     start_consultation, complete_consultation, patient_history,
-    doctor_completed_today, doctor_consultation_detail,
+    doctor_completed_today, doctor_consultation_detail, doctor_patient_record,
 )
 from .lab import lab_queue, lab_start_test, lab_complete_test, lab_reports_for_token
 from .pharmacy import pharmacy_queue, pharmacy_start_dispense, pharmacy_mark_ready_view, pharmacy_complete_dispense

@@ -55,6 +55,7 @@ urlpatterns = [
     path('doctor/completed-today/', views.doctor_completed_today, name='doctor-completed-today'),
     path('doctor/consultation/<int:token_id>/', views.doctor_consultation_detail, name='doctor-consultation-detail'),
     path('patient-history/<int:token_id>/', views.patient_history, name='patient-history'),
+    path('doctor/patient-record/', views.doctor_patient_record, name='doctor-patient-record'),
 
     # Lab
     path('lab/queue/', views.lab_queue, name='lab-queue'),

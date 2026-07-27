@@ -193,6 +193,9 @@ const API = {
     startConsult(tokenId) { return this.post(`/start-consult/${tokenId}/`, {}); },
     completeConsult(tokenId, d) { return this.post(`/complete-consult/${tokenId}/`, d); },
     doctorPatientHistory(tokenId) { return this.get(`/patient-history/${tokenId}/`); },
+    doctorPatientRecord(patientId) {
+      return this.get(`/doctor/patient-record/?patient_id=${encodeURIComponent(patientId)}`);
+    },
     doctorCompletedToday() { return this.get('/doctor/completed-today/'); },
     doctorConsultationDetail(tokenId) { return this.get(`/doctor/consultation/${tokenId}/`); },
 

@@ -12,6 +12,7 @@ from core.models import (
 from core.permissions import IsDoctor
 from core.services.analytics import get_next_eligible_token
 from core.services.workflow import complete_consultation as workflow_complete_consultation, _normalize_lab_test_names
+from accounts.models import User
 from core.utils import (
     format_local_time, get_doctor_for_user, patient_id_for_token,
     patient_is_new, patient_priority_category, serialize_token,
@@ -312,6 +313,58 @@ def _patient_history_filter(token):
     return q
 
 
+def _patient_tokens_filter(patient_user):
+    q = Q(patient=patient_user)
+    if patient_user.phone:
+        q |= Q(patient_phone=patient_user.phone)
+    return q
+
+
+_HISTORY_STATUSES = [
+    'completed', 'pending_lab', 'pending_pharmacy', 'consulting', 'checked_in',
+]
+
+
+def _serialize_token_history_entry(token):
+    consult = getattr(token, 'consultation', None)
+    prescriptions = [
+        {
+            'medicine_name': p.medicine_name,
+            'dosage': p.dosage,
+            'frequency': p.frequency,
+            'duration_days': p.duration_days,
+            'instructions': p.instructions,
+            'dispensed': p.dispensed,
+        }
+        for p in token.prescriptions.all()
+    ]
+    lab_reports = []
+    for order in token.lab_orders.filter(status='completed'):
+        report = getattr(order, 'report', None)
+        lab_reports.append({
+            'test_name': order.test_name,
+            'findings': report.findings if report else '',
+            'report_url': report.report_file.url if report and report.report_file else None,
+            'uploaded_at': format_local_time(report.uploaded_at, '%d %b %Y') if report else None,
+        })
+    return {
+        'token_id': token.id,
+        'token_number': token.token_number,
+        'date': token.slot.date.isoformat(),
+        'doctor_name': str(token.slot.doctor),
+        'status': token.status,
+        'is_followup': token.is_followup,
+        'consultation': {
+            'symptoms': consult.symptoms if consult else '',
+            'diagnosis': consult.diagnosis if consult else '',
+            'notes': consult.notes if consult else '',
+            'followup_date': consult.followup_date.isoformat() if consult and consult.followup_date else None,
+        } if consult else None,
+        'prescriptions': prescriptions,
+        'lab_reports': lab_reports,
+    }
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsDoctor])
 def patient_history(request, token_id):
@@ -328,50 +381,13 @@ def patient_history(request, token_id):
     past_tokens = (
         Token.objects.filter(_patient_history_filter(current))
         .exclude(id=current.id)
-        .filter(status__in=['completed', 'pending_lab', 'pending_pharmacy', 'consulting', 'checked_in'])
+        .filter(status__in=_HISTORY_STATUSES)
         .select_related('slot__doctor', 'consultation')
         .prefetch_related('prescriptions', 'lab_orders__report')
         .order_by('-slot__date', '-created_at')[:15]
     )
 
-    history = []
-    for token in past_tokens:
-        consult = getattr(token, 'consultation', None)
-        prescriptions = [
-            {
-                'medicine_name': p.medicine_name,
-                'dosage': p.dosage,
-                'frequency': p.frequency,
-                'duration_days': p.duration_days,
-                'instructions': p.instructions,
-                'dispensed': p.dispensed,
-            }
-            for p in token.prescriptions.all()
-        ]
-        lab_reports = []
-        for order in token.lab_orders.filter(status='completed'):
-            report = getattr(order, 'report', None)
-            lab_reports.append({
-                'test_name': order.test_name,
-                'findings': report.findings if report else '',
-                'report_url': report.report_file.url if report and report.report_file else None,
-                'uploaded_at': format_local_time(report.uploaded_at, '%d %b %Y') if report else None,
-            })
-        history.append({
-            'token_number': token.token_number,
-            'date': token.slot.date.isoformat(),
-            'doctor_name': str(token.slot.doctor),
-            'status': token.status,
-            'is_followup': token.is_followup,
-            'consultation': {
-                'symptoms': consult.symptoms if consult else '',
-                'diagnosis': consult.diagnosis if consult else '',
-                'notes': consult.notes if consult else '',
-                'followup_date': consult.followup_date.isoformat() if consult and consult.followup_date else None,
-            } if consult else None,
-            'prescriptions': prescriptions,
-            'lab_reports': lab_reports,
-        })
+    history = [_serialize_token_history_entry(token) for token in past_tokens]
 
     prior_visits = Token.objects.filter(_patient_history_filter(current)).exclude(id=current.id).count()
 
@@ -384,5 +400,49 @@ def patient_history(request, token_id):
         'is_returning': prior_visits > 0,
         'is_new_patient': patient_is_new(current.patient),
         'prior_visit_count': prior_visits,
+        'history': history,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsDoctor])
+def doctor_patient_record(request):
+    """Full visit history for a patient looked up by Patient ID (e.g. PAT0001)."""
+    profile = get_doctor_for_user(request.user)
+    if not profile:
+        return Response({'success': False, 'error': 'Doctor profile not found'}, status=404)
+
+    patient_id_raw = (request.GET.get('patient_id') or '').strip()
+    if not patient_id_raw:
+        return Response({'success': False, 'error': 'Patient ID is required'}, status=400)
+
+    patient_user = User.resolve_patient_id(patient_id_raw)
+    if not patient_user:
+        return Response({'success': False, 'error': 'Patient not found'}, status=404)
+
+    tokens = (
+        Token.objects.filter(_patient_tokens_filter(patient_user))
+        .filter(status__in=_HISTORY_STATUSES)
+        .select_related('slot__doctor', 'consultation')
+        .prefetch_related('prescriptions', 'lab_orders__report')
+        .order_by('-slot__date', '-created_at')[:50]
+    )
+
+    latest = tokens[0] if tokens else None
+    history = [_serialize_token_history_entry(token) for token in tokens]
+    visit_count = Token.objects.filter(_patient_tokens_filter(patient_user)).count()
+
+    return Response({
+        'success': True,
+        'patient_id': patient_user.patient_id,
+        'patient_name': (
+            latest.patient_name if latest
+            else patient_user.get_full_name() or patient_user.username
+        ),
+        'patient_age': latest.patient_age if latest else patient_user.age,
+        'patient_phone': latest.patient_phone if latest else patient_user.phone,
+        'patient_address': latest.patient_address if latest else patient_user.address,
+        'is_new_patient': patient_is_new(patient_user),
+        'visit_count': visit_count,
         'history': history,
     })

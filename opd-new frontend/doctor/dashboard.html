@@ -347,6 +347,9 @@
             <div class="sidebar-nav-item" data-nav="completed" onclick="showTab('completed', this)">
               <span data-icon="checkCircle" data-icon-size="18"></span> Completed Today
             </div>
+            <div class="sidebar-nav-item" data-nav="records" onclick="showTab('records', this)">
+              <span data-icon="clipboard" data-icon-size="18"></span> Patient Records
+            </div>
             <div
               class="sidebar-nav-item"
               onclick="logoutPortal('../index.html')"
@@ -379,6 +382,32 @@
             <h3 style="margin-bottom: 1rem;">Completed Today</h3>
             <div id="completedListContent">
               <p style="color: var(--text-muted);">Loading...</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="recordsView" style="display: none;">
+          <div class="card">
+            <h3 style="margin-bottom: 1rem;">Patient Records</h3>
+            <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
+              Enter a Patient ID (e.g. PAT0001) to view prescriptions, lab reports, and visit history.
+            </p>
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: flex-end;">
+              <div class="form-group" style="flex: 1; min-width: 200px; margin: 0;">
+                <label class="form-label" for="patientRecordIdInput">Patient ID</label>
+                <input
+                  type="text"
+                  class="form-input"
+                  id="patientRecordIdInput"
+                  placeholder="PAT0001"
+                  style="text-transform: uppercase;"
+                  onkeydown="if (event.key === 'Enter') searchPatientRecord()"
+                >
+              </div>
+              <button class="btn btn-primary" onclick="searchPatientRecord()">Search</button>
+            </div>
+            <div id="patientRecordContent">
+              <p style="color: var(--text-muted);">Search for a patient to view their history.</p>
             </div>
           </div>
         </div>
@@ -606,8 +635,88 @@
 
         document.getElementById('queueView').style.display = tab === 'queue' ? 'block' : 'none';
         document.getElementById('completedView').style.display = tab === 'completed' ? 'block' : 'none';
+        document.getElementById('recordsView').style.display = tab === 'records' ? 'block' : 'none';
         if (tab === 'completed') loadCompletedToday();
         if (tab === 'queue') loadDoctorQueue();
+      }
+
+      function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function renderVisitHistoryEntry(visit) {
+        const consult = visit.consultation || {};
+        const rxList = visit.prescriptions || [];
+        const labList = visit.lab_reports || [];
+        return `
+          <div class="history-visit">
+            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+              <strong>${escapeHtml(visit.date)} · ${escapeHtml(visit.token_number)}</strong>
+              <span style="color:var(--text-muted);">${escapeHtml(visit.doctor_name)} · ${escapeHtml(visit.status)}</span>
+            </div>
+            ${visit.is_followup ? '<div style="font-size:0.8rem; color:var(--secondary);">Follow-up visit</div>' : ''}
+            ${consult.symptoms ? `<div><strong>Symptoms:</strong> ${escapeHtml(consult.symptoms)}</div>` : ''}
+            ${consult.diagnosis ? `<div><strong>Diagnosis:</strong> ${escapeHtml(consult.diagnosis)}</div>` : ''}
+            ${consult.notes ? `<div><strong>Notes:</strong> ${escapeHtml(consult.notes)}</div>` : ''}
+            ${consult.followup_date ? `<div><strong>Follow-up:</strong> ${escapeHtml(consult.followup_date)}</div>` : ''}
+            ${rxList.length ? `
+              <div style="margin-top:0.5rem;">
+                <strong>Prescriptions</strong>
+                <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
+                  ${rxList.map(p => `<li>${escapeHtml(p.medicine_name)} — ${escapeHtml(p.dosage || '')} ${escapeHtml(p.frequency || '')} ${p.duration_days ? `(${p.duration_days} days)` : ''}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            ${labList.length ? `
+              <div style="margin-top:0.5rem;">
+                <strong>Lab Reports</strong>
+                <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
+                  ${labList.map(l => `<li>${escapeHtml(l.test_name)}${l.findings ? ` — ${escapeHtml(l.findings)}` : ''}${l.report_url ? ` <a href="${escapeHtml(l.report_url)}" target="_blank" rel="noopener">View report</a>` : ''}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            ${!consult.diagnosis && !rxList.length && !labList.length ? '<div style="color:var(--text-muted);">No clinical details recorded for this visit.</div>' : ''}
+          </div>`;
+      }
+
+      function renderPatientRecord(data) {
+        const visits = data.history || [];
+        return `
+          <div class="patient-info-box" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:1rem; margin-bottom:1rem;">
+            <div><span class="label">Patient ID</span><br><span class="value">${escapeHtml(data.patient_id)}</span></div>
+            <div><span class="label">Name</span><br><span class="value">${escapeHtml(data.patient_name)}</span></div>
+            <div><span class="label">Age</span><br><span class="value">${data.patient_age != null ? escapeHtml(data.patient_age) + ' years' : '—'}</span></div>
+            <div><span class="label">Phone</span><br><span class="value">${escapeHtml(data.patient_phone || '—')}</span></div>
+            <div><span class="label">Total visits</span><br><span class="value">${data.visit_count || 0}</span></div>
+          </div>
+          <div class="patient-history-panel" style="max-height:none;">
+            <strong>Visit History</strong> (${visits.length} shown)
+            ${visits.length
+              ? visits.map(renderVisitHistoryEntry).join('')
+              : '<p style="color:var(--text-muted); margin-top:0.75rem;">No visit history on record.</p>'}
+          </div>`;
+      }
+
+      async function searchPatientRecord() {
+        const input = document.getElementById('patientRecordIdInput');
+        const container = document.getElementById('patientRecordContent');
+        const patientId = (input?.value || '').trim();
+        if (!patientId) {
+          Toast.show('Enter a Patient ID', 'error');
+          return;
+        }
+        container.innerHTML = '<p style="color: var(--text-muted);">Loading patient history...</p>';
+        LoadingOverlay.show();
+        const res = await API.doctorPatientRecord(patientId);
+        LoadingOverlay.hide();
+        if (!res.success) {
+          container.innerHTML = `<div class="alert alert-danger">${escapeHtml(res.error || 'Patient not found')}</div>`;
+          return;
+        }
+        container.innerHTML = renderPatientRecord(res);
       }
 
       function updateDateTime() {
