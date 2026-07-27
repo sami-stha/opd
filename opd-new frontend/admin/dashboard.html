@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin Dashboard - General OPD</title>
-    <link rel="stylesheet" href="/css/style.css?v=20260707" />
+    <link rel="stylesheet" href="/css/style.css?v=20260727" />
   </head>
   <body>
     <div class="sidebar-layout">
@@ -55,13 +55,6 @@
             onclick="showSection('slots', this)"
           >
             <span class="nav-icon">◷</span> Slot Config
-          </div>
-          <div
-            class="sidebar-nav-item"
-            data-section="logs"
-            onclick="showSection('logs', this)"
-          >
-            <span class="nav-icon">☰</span> System Logs
           </div>
         </nav>
         <div class="sidebar-footer">
@@ -151,6 +144,41 @@
                 <div class="kpi-value" id="kpiPharmacyQueue">—</div>
               </div>
             </div>
+            <div class="kpi-card">
+              <div class="kpi-icon warning" data-icon="clock" data-icon-size="20"></div>
+              <div class="kpi-body">
+                <div class="kpi-label">Avg Consult Time</div>
+                <div class="kpi-value" id="kpiAvgConsult">—</div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon primary" data-icon="users" data-icon-size="20"></div>
+              <div class="kpi-body">
+                <div class="kpi-label">Doctor Utilization</div>
+                <div class="kpi-value" id="kpiDoctorUtil">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="analytics-charts-grid" style="margin-bottom: 1.25rem;">
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">7-Day OPD Throughput</div>
+                  <div class="analytics-chart-subtitle">Completed visits trend</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="overviewTrendChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Today's Patient Flow</div>
+                  <div class="analytics-chart-subtitle">Check-ins by hour</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="overviewHourlyChart"></canvas></div>
+            </div>
           </div>
 
           <div class="panel">
@@ -185,11 +213,12 @@
                     <th>Queue</th>
                     <th>Completed Today</th>
                     <th>Avg Consult (min)</th>
+                    <th>Utilization</th>
                   </tr>
                 </thead>
                 <tbody id="doctorQueueTable">
                   <tr>
-                    <td colspan="4" class="empty-state">Loading...</td>
+                    <td colspan="5" class="empty-state">Loading...</td>
                   </tr>
                 </tbody>
               </table>
@@ -199,10 +228,108 @@
 
         <!-- ANALYTICS -->
         <div id="analyticsSection" style="display: none">
+          <div class="analytics-live-bar">
+            <div class="analytics-live-indicator">
+              <span class="analytics-live-dot"></span>
+              Live operational data
+            </div>
+            <div style="font-size:0.8125rem; color:var(--text-muted);">
+              Last updated: <strong id="analyticsUpdatedAt">—</strong>
+              <span style="margin-left:0.75rem;">Auto-refresh every 10s</span>
+            </div>
+          </div>
+
+          <div class="analytics-hero-grid" id="analyticsHeroGrid"></div>
+
+          <div class="analytics-charts-grid">
+            <div class="analytics-chart-panel full-width">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">OPD Performance Trend</div>
+                  <div class="analytics-chart-subtitle">Completed visits, average wait time, and consultation duration (7 days)</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap tall"><canvas id="trendChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Peak Hours</div>
+                  <div class="analytics-chart-subtitle">Patient check-ins by hour today</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="hourlyChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Visit Status Today</div>
+                  <div class="analytics-chart-subtitle">Distribution of patient visit states</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="statusChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Slot Performance</div>
+                  <div class="analytics-chart-subtitle">Completed vs no-shows by slot</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="slotChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Waiting Time Distribution</div>
+                  <div class="analytics-chart-subtitle">Completed visits — minutes waited before consult</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="waitChart"></canvas></div>
+            </div>
+            <div class="analytics-chart-panel">
+              <div class="analytics-chart-header">
+                <div>
+                  <div class="analytics-chart-title">Doctor Utilization</div>
+                  <div class="analytics-chart-subtitle">Consultation time vs available slot time today</div>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap"><canvas id="utilizationChart"></canvas></div>
+            </div>
+          </div>
+
           <div class="panel">
             <div class="panel-header">
               <div>
-                <h3 class="panel-title">Performance KPIs</h3>
+                <h3 class="panel-title">Doctor Performance Detail</h3>
+                <p class="panel-subtitle">Queue load, throughput, and utilization per doctor</p>
+              </div>
+            </div>
+            <div id="doctorUtilBars" style="padding: 0.5rem 0 0.25rem;"></div>
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Doctor</th>
+                    <th>Queue</th>
+                    <th>Completed</th>
+                    <th>Avg Consult</th>
+                    <th>Busy (min)</th>
+                    <th>Slot Time (min)</th>
+                    <th>Utilization</th>
+                  </tr>
+                </thead>
+                <tbody id="analyticsDoctorTable">
+                  <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">Extended KPI Metrics</h3>
                 <p class="panel-subtitle" id="analyticsDate">—</p>
               </div>
             </div>
@@ -214,8 +341,7 @@
               <div>
                 <h3 class="panel-title">Slot Optimization Recommendations</h3>
                 <p class="panel-subtitle">
-                  Generated when configured vs actual consultation time exceeds
-                  threshold
+                  Generated when configured vs actual consultation time exceeds threshold
                 </p>
               </div>
             </div>
@@ -321,31 +447,6 @@
 
         <!-- THROTTLE (disabled) -->
         <div id="throttleSection" style="display: none"></div>
-
-        <!-- LOGS -->
-        <div id="logsSection" style="display: none">
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3 class="panel-title">System Activity Logs</h3>
-                <p class="panel-subtitle">
-                  System activity
-                </p>
-              </div>
-            </div>
-            <div
-              id="logsContainer"
-              style="
-                max-height: 480px;
-                overflow-y: auto;
-                border: 1px solid var(--border);
-                border-radius: var(--radius-lg);
-              "
-            >
-              <div id="logsList"></div>
-            </div>
-          </div>
-        </div>
       </main>
     </div>
 
@@ -418,25 +519,48 @@
             <label><input type="checkbox" id="staffIsActive" checked /> Account active (can log in)</label>
           </div>
         </div>
-        <div class="modal-footer" style="display:flex; gap:0.5rem; justify-content:flex-end;">
-          <button class="btn btn-outline" onclick="closeStaffModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveStaff()">Save</button>
+        <div class="modal-footer" style="display:flex; gap:0.5rem; justify-content:space-between; align-items:center;">
+          <button
+            type="button"
+            id="staffRemoveBtn"
+            class="btn btn-danger"
+            style="display:none;"
+            onclick="removeStaffFromModal()"
+          >
+            Remove
+          </button>
+          <div style="display:flex; gap:0.5rem; margin-left:auto;">
+            <button class="btn btn-outline" onclick="closeStaffModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveStaff()">Save</button>
+          </div>
         </div>
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/js/icons.js"></script>
-    <script src="/js/app.js?v=20260712d"></script>
-    <script src="/js/api.js?v=20260712d"></script>
+    <script src="/js/app.js?v=20260727"></script>
+    <script src="/js/api.js?v=20260727b"></script>
     <script>
       let analyticsData = null;
+      const chartInstances = {};
+      const CHART_COLORS = {
+        primary: '#0B3D5C',
+        secondary: '#0D9488',
+        accent: '#0284C7',
+        success: '#059669',
+        warning: '#D97706',
+        danger: '#DC2626',
+        muted: '#94A3B8',
+        palette: ['#0B3D5C', '#0D9488', '#0284C7', '#059669', '#D97706', '#DC2626', '#6366F1', '#8B5CF6'],
+      };
+
       const sectionTitles = {
         overview: ["Overview", "Today's operational summary"],
-        analytics: ["Analytics", "KPIs and adaptive scheduling insights"],
+        analytics: ["Analytics Dashboard", "Real-time OPD performance and operational insights"],
         doctors: ["Doctor Management", "Manage doctors and availability"],
         staff: ["Staff Accounts", "Manage credentials, roles, and access"],
         slots: ["Slot Configuration", "Consultation time and token capacity"],
-        logs: ["System Logs", "Activity history"],
       };
 
       function showSection(section, el) {
@@ -457,7 +581,291 @@
         document.getElementById("pageMeta").textContent = meta;
         if (section === "doctors") renderDoctors();
         if (section === "staff") renderStaff();
-        if (section === "logs") renderLogs();
+        if (section === "analytics" && analyticsData) {
+          requestAnimationFrame(() => renderAnalyticsCharts(analyticsData));
+        }
+      }
+
+      function destroyChart(id) {
+        if (chartInstances[id]) {
+          chartInstances[id].destroy();
+          delete chartInstances[id];
+        }
+      }
+
+      function makeChart(id, config) {
+        const canvas = document.getElementById(id);
+        if (!canvas || typeof Chart === 'undefined') return;
+        destroyChart(id);
+        chartInstances[id] = new Chart(canvas, config);
+      }
+
+      function renderAnalyticsCharts(data) {
+        const charts = data.charts || {};
+        const trend = charts.daily_trend || [];
+        const hourly = charts.hourly_checkins || [];
+        const status = charts.visit_status || [];
+        const slots = charts.slot_breakdown || [];
+        const waitDist = charts.wait_time_distribution || [];
+        const util = charts.doctor_utilization || [];
+
+        makeChart('overviewTrendChart', {
+          type: 'line',
+          data: {
+            labels: trend.map((d) => d.label),
+            datasets: [{
+              label: 'Completed',
+              data: trend.map((d) => d.completed),
+              borderColor: CHART_COLORS.secondary,
+              backgroundColor: 'rgba(13, 148, 136, 0.12)',
+              fill: true,
+              tension: 0.35,
+              pointRadius: 3,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('overviewHourlyChart', {
+          type: 'bar',
+          data: {
+            labels: hourly.map((h) => h.label),
+            datasets: [{
+              label: 'Check-ins',
+              data: hourly.map((h) => h.count),
+              backgroundColor: CHART_COLORS.accent,
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('trendChart', {
+          type: 'line',
+          data: {
+            labels: trend.map((d) => d.label),
+            datasets: [
+              {
+                label: 'Completed',
+                data: trend.map((d) => d.completed),
+                borderColor: CHART_COLORS.secondary,
+                backgroundColor: 'rgba(13, 148, 136, 0.08)',
+                fill: true,
+                tension: 0.35,
+                yAxisID: 'y',
+              },
+              {
+                label: 'Avg Wait (min)',
+                data: trend.map((d) => d.avg_wait_minutes),
+                borderColor: CHART_COLORS.warning,
+                tension: 0.35,
+                yAxisID: 'y1',
+              },
+              {
+                label: 'Avg Consult (min)',
+                data: trend.map((d) => d.avg_consult_minutes),
+                borderColor: CHART_COLORS.primary,
+                tension: 0.35,
+                yAxisID: 'y1',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Visits' } },
+              y1: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'Minutes' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('hourlyChart', {
+          type: 'bar',
+          data: {
+            labels: hourly.map((h) => h.label),
+            datasets: [{
+              label: 'Check-ins',
+              data: hourly.map((h) => h.count),
+              backgroundColor: hourly.map((h) => h.count > 0 ? CHART_COLORS.accent : '#E2E8F0'),
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('statusChart', {
+          type: 'doughnut',
+          data: {
+            labels: status.map((s) => s.label),
+            datasets: [{
+              data: status.map((s) => s.count),
+              backgroundColor: CHART_COLORS.palette,
+              borderWidth: 2,
+              borderColor: '#fff',
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+          },
+        });
+
+        makeChart('slotChart', {
+          type: 'bar',
+          data: {
+            labels: slots.map((s) => s.label),
+            datasets: [
+              { label: 'Completed', data: slots.map((s) => s.completed), backgroundColor: CHART_COLORS.success, borderRadius: 4 },
+              { label: 'No-show', data: slots.map((s) => s.no_show), backgroundColor: CHART_COLORS.danger, borderRadius: 4 },
+              { label: 'In Queue', data: slots.map((s) => s.checked_in), backgroundColor: CHART_COLORS.accent, borderRadius: 4 },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { beginAtZero: true, stacked: false, grid: { color: '#E2E8F0' } },
+              x: { stacked: false, grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('waitChart', {
+          type: 'bar',
+          data: {
+            labels: waitDist.map((w) => w.bucket + ' min'),
+            datasets: [{
+              label: 'Patients',
+              data: waitDist.map((w) => w.count),
+              backgroundColor: CHART_COLORS.primary,
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('utilizationChart', {
+          type: 'bar',
+          data: {
+            labels: util.map((d) => d.doctor.replace('Dr. ', '')),
+            datasets: [{
+              label: 'Utilization %',
+              data: util.map((d) => d.utilization_pct),
+              backgroundColor: util.map((d) =>
+                d.utilization_pct >= 75 ? CHART_COLORS.success
+                  : d.utilization_pct >= 40 ? CHART_COLORS.warning
+                  : CHART_COLORS.muted
+              ),
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { beginAtZero: true, max: 100, grid: { color: '#E2E8F0' } },
+              y: { grid: { display: false } },
+            },
+          },
+        });
+      }
+
+      function renderAnalyticsHero(data) {
+        const heroes = [
+          { label: 'Avg Waiting Time', value: fmt(data.avg_waiting_minutes, ' min'), sub: 'Patient satisfaction indicator' },
+          { label: 'Avg Consultation', value: fmt(data.avg_consultation_minutes, ' min'), sub: 'Actual doctor consult duration' },
+          { label: 'Doctor Utilization', value: fmt(data.avg_doctor_utilization_pct, '%'), sub: 'Avg busy time vs slot capacity' },
+          { label: 'System Throughput', value: fmt(data.system_throughput), sub: 'Completed visits today' },
+          { label: 'Check-in Compliance', value: fmt(data.checkin_compliance, '%'), sub: 'On-time arrivals' },
+          { label: 'No-Show Rate', value: fmt(data.no_show_rate, '%'), sub: `${data.expired_no_shows ?? data.no_shows ?? 0} missed today` },
+        ];
+        const el = document.getElementById('analyticsHeroGrid');
+        if (!el) return;
+        el.innerHTML = heroes.map((h) => `
+          <div class="analytics-hero-card">
+            <div class="label">${h.label}</div>
+            <div class="value">${h.value}</div>
+            <div class="sub">${h.sub}</div>
+          </div>
+        `).join('');
+      }
+
+      function renderDoctorUtilBars(doctors) {
+        const el = document.getElementById('doctorUtilBars');
+        if (!el) return;
+        if (!doctors.length) {
+          el.innerHTML = '<div class="empty-state">No doctor utilization data</div>';
+          return;
+        }
+        el.innerHTML = doctors.map((d) => `
+          <div class="util-bar-row">
+            <div class="util-bar-label">${d.doctor}</div>
+            <div class="util-bar-track">
+              <div class="util-bar-fill" style="width:${d.utilization_pct || 0}%"></div>
+            </div>
+            <div class="util-bar-value">${d.utilization_pct ?? 0}%</div>
+          </div>
+        `).join('');
+      }
+
+      function renderAnalyticsDoctorTable(queues) {
+        const tbody = document.getElementById('analyticsDoctorTable');
+        if (!tbody) return;
+        if (!queues.length) {
+          tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No doctor data available</td></tr>';
+          return;
+        }
+        tbody.innerHTML = queues.map((d) => `
+          <tr>
+            <td><strong>${d.doctor}</strong></td>
+            <td><span class="badge ${d.queue > 10 ? 'badge-warning' : 'badge-info'}">${d.queue}</span></td>
+            <td>${d.completed}</td>
+            <td>${d.avg_consult_minutes != null ? d.avg_consult_minutes + ' min' : '—'}</td>
+            <td>${d.busy_minutes ?? '—'}</td>
+            <td>${d.slot_minutes ?? '—'}</td>
+            <td><strong>${d.utilization_pct ?? 0}%</strong></td>
+          </tr>
+        `).join('');
       }
 
       function fmt(val, suffix = "") {
@@ -486,6 +894,19 @@
           data.pending_lab_tests ?? "—";
         document.getElementById("kpiPharmacyQueue").textContent =
           data.pharmacy_queue ?? "—";
+        document.getElementById("kpiAvgConsult").textContent = fmt(
+          data.avg_consultation_minutes,
+          " min",
+        );
+        document.getElementById("kpiDoctorUtil").textContent = fmt(
+          data.avg_doctor_utilization_pct,
+          "%",
+        );
+
+        if (document.getElementById('analyticsUpdatedAt')) {
+          document.getElementById('analyticsUpdatedAt').textContent =
+            data.updated_at || new Date().toLocaleTimeString();
+        }
 
         if (typeof MedIcons !== "undefined") MedIcons.inject();
 
@@ -534,10 +955,16 @@
                         <td><span class="badge ${d.queue > 10 ? "badge-warning" : "badge-info"}">${d.queue}</span></td>
                         <td>${d.completed}</td>
                         <td>${d.avg_consult_minutes != null ? d.avg_consult_minutes + " min" : "—"}</td>
+                        <td><strong>${d.utilization_pct ?? 0}%</strong></td>
                     </tr>`,
               )
               .join("")
-          : '<tr><td colspan="4" class="empty-state">No doctor data available</td></tr>';
+          : '<tr><td colspan="5" class="empty-state">No doctor data available</td></tr>';
+
+        renderAnalyticsHero(data);
+        renderDoctorUtilBars(queues);
+        renderAnalyticsDoctorTable(queues);
+        renderAnalyticsCharts(data);
 
         renderAlerts(data);
         renderRecommendations(data.recommendations || []);
@@ -688,6 +1115,11 @@
         document.getElementById('staffPasswordLabel').textContent = editId ? 'Password' : 'Password *';
         document.getElementById('staffPasswordHint').style.display = editId ? '' : 'none';
         document.getElementById('staffActiveGroup').style.display = editId ? '' : 'none';
+        const me = API.getStoredUser();
+        const removeBtn = document.getElementById('staffRemoveBtn');
+        if (removeBtn) {
+          removeBtn.style.display = editId && String(me?.id) !== String(editId) ? '' : 'none';
+        }
         document.getElementById('staffPassword').value = '';
         document.getElementById('staffFullName').value = '';
         document.getElementById('staffUsername').value = '';
@@ -731,6 +1163,30 @@
 
       function closeStaffModal() {
         document.getElementById('staffModal').classList.remove('active');
+      }
+
+      async function removeStaffFromModal() {
+        const userId = document.getElementById('staffEditId').value;
+        if (!userId) return;
+        await removeStaff(userId, true);
+      }
+
+      async function removeStaff(userId, fromModal = false) {
+        const member = staffCache.find((s) => String(s.id) === String(userId));
+        const label = member?.full_name || member?.username || 'this staff member';
+        if (!confirm(`Remove ${label}? This cannot be undone.`)) return;
+
+        LoadingOverlay.show();
+        const res = await API.adminDeleteStaff(userId);
+        LoadingOverlay.hide();
+        if (!res.success) {
+          Toast.show(res.error || 'Failed to remove staff', 'error');
+          return;
+        }
+        Toast.show(res.message || 'Staff removed', 'success');
+        if (fromModal) closeStaffModal();
+        await renderStaff();
+        if (member?.role === 'doctor') renderDoctors();
       }
 
       async function saveStaff() {
@@ -872,29 +1328,6 @@
           renderSlotConfigForms(res.slots || {});
           Toast.show('Slot configuration saved', 'success');
         } else Toast.show(res.error || 'Failed', 'error');
-      }
-
-      let logs = [];
-
-      function renderLogs() {
-        const container = document.getElementById("logsList");
-        if (!logs.length) {
-          container.innerHTML =
-            '<div class="empty-state">No system logs recorded</div>';
-          return;
-        }
-        container.innerHTML = logs
-          .map(
-            (log) => `
-                <div class="log-entry">
-                    <span class="log-time">${new Date(log.time).toLocaleString()}</span>
-                    <span class="log-user">${log.user}</span>
-                    <span class="log-action">${log.action}</span>
-                    <span class="badge badge-info">${log.type}</span>
-                </div>
-            `,
-          )
-          .join("");
       }
 
       API.requireStaff(["admin"]).then((user) => {

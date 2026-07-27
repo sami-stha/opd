@@ -220,11 +220,11 @@ const API = {
     adminStaffDetail(id) { return this.get(`/admin/staff/${id}/`); },
     adminCreateStaff(d) { return this.post('/admin/staff/', d); },
     adminUpdateStaff(id, d) { return this.put(`/admin/staff/${id}/`, d); },
+    adminDeleteStaff(id) { return this.request('DELETE', `/admin/staff/${id}/`); },
     adminSlotConfig() { return this.get('/admin/slots/config/'); },
     adminSaveSlotConfig(d) { return this.put('/admin/slots/config/', d); },
     adminThrottleConfig() { return this.get('/admin/throttle/config/'); },
     adminSaveThrottleConfig(d) { return this.put('/admin/throttle/config/', d); },
-    adminThrottleLogs() { return this.get('/admin/throttle/logs/'); },
 
     requireStaff(roles, redirectUrl = '../staff/login.html') {
         return this.authMe().then(data => {

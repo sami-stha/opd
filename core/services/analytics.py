@@ -144,16 +144,27 @@ def compute_kpis(date=None):
             if t.consultation_duration_minutes() is not None
         ]
         slot_minutes = 120 * doc_tokens.values('slot_id').distinct().count()
-        busy = sum(doc_consult)
-        idle = max(slot_minutes - busy, 0) if slot_minutes else 0
-        doctor_idle_minutes += idle
+        busy_minutes = sum(doc_consult)
+        idle_minutes = max(slot_minutes - busy_minutes, 0) if slot_minutes else 0
+        doctor_idle_minutes += idle_minutes
+        utilization_pct = round((busy_minutes / slot_minutes * 100), 1) if slot_minutes else 0
         doctor_queues.append({
             'doctor': str(doctor),
             'doctor_id': doctor.id,
             'queue': doc_tokens.filter(status='checked_in').count(),
             'completed': doc_completed.count(),
             'avg_consult_minutes': round(sum(doc_consult) / len(doc_consult), 1) if doc_consult else None,
+            'busy_minutes': round(busy_minutes, 1),
+            'slot_minutes': slot_minutes,
+            'idle_minutes': round(max(slot_minutes - busy_minutes, 0), 1),
+            'utilization_pct': min(utilization_pct, 100),
         })
+
+    avg_utilization = round(
+        sum(d['utilization_pct'] for d in doctor_queues) / len(doctor_queues), 1
+    ) if doctor_queues else 0
+
+    charts = _build_chart_series(date, tokens, doctor_queues, peak_hours)
 
     return {
         'date': date.isoformat(),
@@ -184,7 +195,115 @@ def compute_kpis(date=None):
         'peak_hour_counts': peak_hours,
         'lab_turnaround_minutes': avg_lab_tat,
         'doctor_queues': doctor_queues,
+        'avg_doctor_utilization_pct': avg_utilization,
+        'charts': charts,
     }
+
+
+def _build_chart_series(date, tokens, doctor_queues, peak_hours):
+    """Chart-ready datasets for the admin analytics dashboard."""
+    status_labels = {
+        'booked': 'Booked',
+        'checked_in': 'Checked In',
+        'consulting': 'Consulting',
+        'pending_lab': 'Pending Lab',
+        'pending_pharmacy': 'Pending Pharmacy',
+        'completed': 'Completed',
+        'expired': 'No-show',
+        'cancelled': 'Cancelled',
+    }
+    status_rows = tokens.values('status').annotate(count=Count('id')).order_by('status')
+    visit_status = [
+        {'status': row['status'], 'label': status_labels.get(row['status'], row['status']), 'count': row['count']}
+        for row in status_rows if row['count']
+    ]
+
+    slot_labels = {'morning': 'Morning', 'afternoon': 'Afternoon', 'evening': 'Evening'}
+    slot_breakdown = []
+    for slot_type, label in slot_labels.items():
+        slot_tokens = tokens.filter(slot__slot_type=slot_type)
+        slot_breakdown.append({
+            'slot': slot_type,
+            'label': label,
+            'booked': slot_tokens.exclude(status='cancelled').count(),
+            'completed': slot_tokens.filter(status='completed').count(),
+            'no_show': slot_tokens.filter(status='expired').count(),
+            'checked_in': slot_tokens.filter(status__in=['checked_in', 'consulting']).count(),
+        })
+
+    hourly = []
+    for hour in range(6, 22):
+        hourly.append({
+            'hour': hour,
+            'label': f'{hour:02d}:00',
+            'count': peak_hours.get(hour, 0),
+        })
+
+    trend = _compute_daily_trend(date, days=7)
+
+    wait_buckets = {'0-10': 0, '11-20': 0, '21-30': 0, '31-45': 0, '46+': 0}
+    for t in tokens.filter(status='completed'):
+        wt = t.waiting_time_minutes()
+        if wt is None:
+            continue
+        if wt <= 10:
+            wait_buckets['0-10'] += 1
+        elif wt <= 20:
+            wait_buckets['11-20'] += 1
+        elif wt <= 30:
+            wait_buckets['21-30'] += 1
+        elif wt <= 45:
+            wait_buckets['31-45'] += 1
+        else:
+            wait_buckets['46+'] += 1
+
+    return {
+        'visit_status': visit_status,
+        'slot_breakdown': slot_breakdown,
+        'hourly_checkins': hourly,
+        'daily_trend': trend,
+        'wait_time_distribution': [
+            {'bucket': k, 'count': v} for k, v in wait_buckets.items()
+        ],
+        'doctor_utilization': [
+            {
+                'doctor': d['doctor'],
+                'utilization_pct': d['utilization_pct'],
+                'busy_minutes': d['busy_minutes'],
+                'slot_minutes': d['slot_minutes'],
+                'completed': d['completed'],
+            }
+            for d in doctor_queues
+        ],
+    }
+
+
+def _compute_daily_trend(end_date, days=7):
+    """Last N days of OPD performance for trend charts."""
+    start_date = end_date - timedelta(days=days - 1)
+    rows = []
+    for offset in range(days):
+        d = start_date + timedelta(days=offset)
+        day_tokens = Token.objects.filter(slot__date=d).exclude(status='cancelled')
+        completed = day_tokens.filter(status='completed')
+        wait_times = [
+            t.waiting_time_minutes() for t in completed
+            if t.waiting_time_minutes() is not None
+        ]
+        consult_times = [
+            t.consultation_duration_minutes() for t in completed
+            if t.consultation_duration_minutes() is not None
+        ]
+        rows.append({
+            'date': d.isoformat(),
+            'label': d.strftime('%a %d'),
+            'patients': day_tokens.count(),
+            'completed': completed.count(),
+            'no_shows': day_tokens.filter(status='expired').count(),
+            'avg_wait_minutes': round(sum(wait_times) / len(wait_times), 1) if wait_times else 0,
+            'avg_consult_minutes': round(sum(consult_times) / len(consult_times), 1) if consult_times else 0,
+        })
+    return rows
 
 
 def compute_daily_analytics(date=None):

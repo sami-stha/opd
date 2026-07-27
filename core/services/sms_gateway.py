@@ -103,7 +103,7 @@ def send_via_sparrow(phone: str, message: str) -> SmsDeliveryResult:
     except json.JSONDecodeError:
         payload = {}
 
-    # Sparrow returns response_code 200 on success; some responses use "count"
+  
     response_code = payload.get('response_code', status)
     if str(response_code) in ('200', '201') or payload.get('count', 0):
         return SmsDeliveryResult(success=True, provider='sparrow', detail=body[:500])

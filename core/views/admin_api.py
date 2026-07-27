@@ -158,14 +158,49 @@ def admin_staff_list(request):
     }, status=201)
 
 
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'PUT', 'DELETE'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def admin_staff_detail(request, user_id):
-    """Get or update a staff account's credentials and attributes."""
+    """Get, update, or remove a staff account."""
     try:
         user = User.objects.get(id=user_id, role__in=STAFF_ROLES)
     except User.DoesNotExist:
         return Response({'success': False, 'error': 'Staff account not found'}, status=404)
+
+    if request.method == 'DELETE':
+        if user.id == request.user.id:
+            return Response({
+                'success': False,
+                'error': 'You cannot remove your own account',
+            }, status=400)
+
+        if user.role == 'admin':
+            other_admins = User.objects.filter(
+                role='admin', is_active=True,
+            ).exclude(id=user.id).count()
+            if other_admins == 0:
+                return Response({
+                    'success': False,
+                    'error': 'Cannot remove the only active administrator',
+                }, status=400)
+
+        if user.role == 'doctor':
+            profile = _doctor_profile_for(user)
+            if profile and Token.objects.filter(slot__doctor=profile).exists():
+                return Response({
+                    'success': False,
+                    'error': (
+                        'This doctor has consultation history. '
+                        'Deactivate the account instead of removing it.'
+                    ),
+                }, status=400)
+
+        name = user.get_full_name() or user.username
+        user.delete()
+        return Response({
+            'success': True,
+            'message': f'Staff account "{name}" removed',
+        })
 
     if request.method == 'GET':
         return Response({'success': True, 'staff': _serialize_staff(user)})
@@ -439,4 +474,5 @@ def analytics(request):
         'throttle_events': ThrottleLog.objects.filter(
             triggered_at__date=timezone.localdate(), action='throttled'
         ).count(),
+        'updated_at': timezone.localtime().strftime('%Y-%m-%d %H:%M:%S'),
     })
