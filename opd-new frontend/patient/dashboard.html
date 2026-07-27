@@ -181,6 +181,69 @@
         flex-shrink: 0;
         align-items: center;
       }
+      .pending-lab-section {
+        margin-bottom: 1.5rem;
+      }
+      .pending-lab-section h3 {
+        margin: 0 0 1rem;
+      }
+      .payment-status-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .payment-status-badge.pending {
+        background: #fef3c7;
+        color: #b45309;
+      }
+      .payment-status-badge.paid {
+        background: var(--success-bg);
+        color: var(--success);
+      }
+      .sidebar-nav-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.25rem;
+        height: 1.25rem;
+        padding: 0 0.35rem;
+        margin-left: 0.35rem;
+        border-radius: 999px;
+        font-size: 0.65rem;
+        font-weight: 700;
+        background: var(--warning, #d97706);
+        color: #fff;
+      }
+      .followup-reminder-card {
+        border: 1px solid #fcd34d;
+        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+        border-radius: var(--radius-lg);
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      .followup-reminder-card h3 {
+        margin: 0 0 0.5rem;
+        color: #92400e;
+      }
+      .followup-reminder-item {
+        background: #fff;
+        border: 1px solid #fde68a;
+        border-radius: var(--radius);
+        padding: 1rem;
+        margin-top: 0.75rem;
+      }
+      .followup-exempt-badge {
+        display: inline-block;
+        background: var(--success-bg);
+        color: var(--success);
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        margin-top: 0.35rem;
+      }
       .payment-receipt {
         background: #fff;
         border: 2px solid #000;
@@ -434,6 +497,7 @@
             </div>
             <div class="sidebar-nav-item" data-nav="appointments" onclick="showSection('appointments', this)">
               <span data-icon="calendar" data-icon-size="18"></span> Appointments
+              <span class="sidebar-nav-badge" id="followupNavBadge" style="display:none;">0</span>
             </div>
             <div
               class="sidebar-nav-item"
@@ -444,6 +508,7 @@
             </div>
             <div class="sidebar-nav-item" data-nav="lab-reports" onclick="showSection('lab-reports', this)">
               <span data-icon="microscope" data-icon-size="18"></span> Lab Reports
+              <span class="sidebar-nav-badge" id="pendingLabBadge" style="display:none;">0</span>
             </div>
             <div class="sidebar-nav-item" data-nav="bills" onclick="showSection('bills', this)">
               <span data-icon="wallet" data-icon-size="18"></span> Bills & Payments
@@ -503,6 +568,7 @@
               </div>
             </div>
           </div>
+          <div id="followupReminderSection"></div>
           <div
             class="card"
             id="nextAppointmentCard"
@@ -546,6 +612,7 @@
 
         <!-- Appointments Section -->
         <div id="appointmentsSection" style="display: none">
+          <div id="appointmentsFollowupSection" class="followup-reminder-card" style="display:none; margin-bottom: 1.5rem;"></div>
           <div class="card">
             <h3>All Appointments</h3>
             <div class="table-container">
@@ -574,6 +641,8 @@
 
         <!-- Lab Reports Section -->
         <div id="labReportsSection" style="display: none">
+          <div id="pendingLabPaymentsSection" class="pending-lab-section"></div>
+          <h3 style="margin: 0 0 1rem;">Completed Reports</h3>
           <div id="labReportsList"></div>
         </div>
 
@@ -684,7 +753,11 @@
       let appointments = [];
       let doctorPrescriptions = [];
       let labReports = [];
+      let pendingLabPayments = [];
+      let followupReminders = [];
+      let followupBookingId = null;
       let bills = [];
+      let labPaymentLoadingId = null;
       let currentPatientName = 'Patient';
       let queuePollTimer = null;
       let dashboardPollTimer = null;
@@ -852,6 +925,169 @@
         return TimeUtils.formatApptDateLabel(isoDate);
       }
 
+      function mapPendingLabPayment(item) {
+        return {
+          order_id: item.order_id,
+          token_id: item.token_id,
+          token_number: item.token_number,
+          test_name: item.test_name,
+          amount: item.amount,
+          date: item.date,
+          date_display: item.date_display || item.date,
+          doctor_name: item.doctor_name,
+          payment_status: item.payment_status || 'pending',
+          order_status: item.order_status,
+        };
+      }
+
+      function updatePendingLabBadge() {
+        const badge = document.getElementById('pendingLabBadge');
+        if (!badge) return;
+        const count = pendingLabPayments.filter((p) => p.payment_status === 'pending').length;
+        if (count > 0) {
+          badge.style.display = 'inline-flex';
+          badge.textContent = String(count);
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      function updateFollowupNavBadge() {
+        const badge = document.getElementById('followupNavBadge');
+        if (!badge) return;
+        const count = followupReminders.filter((f) => f.can_book).length;
+        if (count > 0) {
+          badge.style.display = 'inline-flex';
+          badge.textContent = String(count);
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      function renderFollowupItemHtml(f) {
+        const booked = f.booked_followup;
+        if (f.already_booked && booked) {
+          return `
+            <div class="followup-reminder-item">
+              <strong>${escapeHtml(f.doctor_name)}</strong>
+              <div style="font-size:0.9rem; color:var(--text-secondary); margin-top:0.25rem;">
+                Follow-up booked · Token <strong>${escapeHtml(booked.token_number)}</strong>
+                · ${escapeHtml(formatApptDate(booked.date))}
+                ${booked.fee_exempted ? '<span class="followup-exempt-badge">Fee exempt</span>' : ''}
+              </div>
+            </div>`;
+        }
+        if (!f.can_book) return '';
+
+        const exemptDays = f.exempt_within_days || 3;
+        const bookDate = f.recommended_booking_date;
+        const exemptLabel = f.fee_exempt_on_recommended_date
+          ? `Free follow-up (fee exempt within ${exemptDays} days)`
+          : 'Consultation fee applies';
+        const loading = followupBookingId === f.original_token_id;
+
+        return `
+          <div class="followup-reminder-item">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+              <div>
+                <strong>${escapeHtml(f.doctor_name)}</strong>
+                <div style="font-size:0.9rem; margin-top:0.35rem;">
+                  Scheduled follow-up: <strong>${escapeHtml(f.followup_date_display || formatApptDate(f.followup_date))}</strong>
+                </div>
+                ${f.diagnosis ? `<div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">Diagnosis: ${escapeHtml(f.diagnosis)}</div>` : ''}
+                ${f.followup_instructions ? `<div style="font-size:0.85rem; margin-top:0.25rem;">${escapeHtml(f.followup_instructions)}</div>` : ''}
+                ${f.fee_exempt_available ? `<div style="font-size:0.8rem; margin-top:0.5rem; color:#92400e;">Fee exemption ends ${escapeHtml(f.exemption_end_display)} (${f.days_until_exemption_ends} day(s) left)</div>` : ''}
+                <span class="followup-exempt-badge">${escapeHtml(exemptLabel)}</span>
+              </div>
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick="bookFollowupFromDashboard(${f.original_token_id}, '${bookDate || ''}')"
+                ${loading ? 'disabled' : ''}
+              >${loading ? 'Booking...' : f.fee_exempt_on_recommended_date ? 'Book Free Follow-up' : 'Book Follow-up'}</button>
+            </div>
+          </div>`;
+      }
+
+      function renderFollowupReminders(targetId = 'followupReminderSection') {
+        const container = document.getElementById(targetId);
+        if (!container) return;
+
+        const actionable = followupReminders.filter((f) => f.can_book || f.already_booked);
+        if (!actionable.length) {
+          container.innerHTML = '';
+          container.style.display = 'none';
+          return;
+        }
+
+        const bookable = followupReminders.filter((f) => f.can_book);
+        container.style.display = 'block';
+        container.innerHTML = `
+          <h3>${bookable.length ? 'Follow-up Reminder' : 'Follow-up Status'}</h3>
+          <p style="margin:0; font-size:0.9rem; color:#92400e;">
+            ${bookable.length
+              ? `Your doctor scheduled a follow-up. Book within ${bookable[0]?.exempt_within_days || 3} days of your visit for a fee-exempt consultation.`
+              : 'Your follow-up appointments'}
+          </p>
+          ${actionable.map(renderFollowupItemHtml).join('')}`;
+      }
+
+      async function bookFollowupFromDashboard(originalTokenId, recommendedDate) {
+        if (followupBookingId) return;
+        const item = followupReminders.find((f) => f.original_token_id === originalTokenId);
+        if (!item || !item.can_book) {
+          Toast.show('This follow-up cannot be booked right now', 'info');
+          return;
+        }
+
+        const bookDate = recommendedDate || item.recommended_booking_date;
+        const dateLabel = formatApptDate(bookDate);
+        const feeNote = item.fee_exempt_on_recommended_date
+          ? 'Your consultation fee will be waived.'
+          : 'Consultation fee will apply.';
+        const ok = confirm(`Book follow-up with ${item.doctor_name} for ${dateLabel}? ${feeNote}`);
+        if (!ok) return;
+
+        followupBookingId = originalTokenId;
+        renderFollowupReminders();
+        renderFollowupReminders('appointmentsFollowupSection');
+        LoadingOverlay.show();
+        const payload = bookDate ? { date: bookDate } : {};
+        const res = await API.createFollowup(originalTokenId, payload);
+        LoadingOverlay.hide();
+        followupBookingId = null;
+
+        if (!res.success) {
+          Toast.show(res.error || 'Could not book follow-up', 'error');
+          renderFollowupReminders();
+          renderFollowupReminders('appointmentsFollowupSection');
+          return;
+        }
+
+        await refreshJourneyFromApi();
+        renderFollowupReminders();
+        renderFollowupReminders('appointmentsFollowupSection');
+        renderOverview();
+        Toast.show(
+          res.fee_exempted
+            ? `Free follow-up booked! Token ${res.followup_token}`
+            : `Follow-up booked. Token ${res.followup_token}. Please pay at reception.`,
+          'success'
+        );
+      }
+
+      function formatLabAmount(amount) {
+        return `Rs ${Number(amount || 0).toLocaleString('en-NP')}`;
+      }
+
+      function paymentStatusBadge(status) {
+        const normalized = String(status || 'pending').toLowerCase();
+        if (normalized === 'paid') {
+          return '<span class="payment-status-badge paid">Paid</span>';
+        }
+        return '<span class="payment-status-badge pending">Pending</span>';
+      }
+
       function mapPaymentBill(b) {
         return {
           id: b.payment_id,
@@ -953,6 +1189,18 @@
             status: 'completed',
           }));
         }
+        if (journeyRes.pending_lab_payments?.length) {
+          pendingLabPayments = journeyRes.pending_lab_payments.map(mapPendingLabPayment);
+        } else {
+          pendingLabPayments = [];
+        }
+        updatePendingLabBadge();
+        if (journeyRes.followups?.length) {
+          followupReminders = journeyRes.followups;
+        } else {
+          followupReminders = [];
+        }
+        updateFollowupNavBadge();
         if (journeyRes.payments?.length) {
           bills = journeyRes.payments.map(mapPaymentBill);
         }
@@ -1009,6 +1257,18 @@
               status: 'completed',
             }));
           }
+          if (journeyRes.pending_lab_payments?.length) {
+            pendingLabPayments = journeyRes.pending_lab_payments.map(mapPendingLabPayment);
+          } else {
+            pendingLabPayments = [];
+          }
+          updatePendingLabBadge();
+          if (journeyRes.followups?.length) {
+            followupReminders = journeyRes.followups;
+          } else {
+            followupReminders = [];
+          }
+          updateFollowupNavBadge();
           if (journeyRes.payments?.length) {
             bills = journeyRes.payments.map(mapPaymentBill);
           }
@@ -1042,9 +1302,15 @@
           const queueVisible = document.getElementById('queueSection')?.style.display !== 'none';
           const labVisible = document.getElementById('labReportsSection')?.style.display !== 'none';
           if (overviewVisible) renderOverview();
-          if (apptVisible) renderAllAppointments();
+          if (apptVisible) {
+            renderFollowupReminders('appointmentsFollowupSection');
+            renderAllAppointments();
+          }
           if (queueVisible) await renderLiveQueue();
-          if (labVisible) renderLabReports();
+          if (labVisible) {
+            renderPendingLabPayments();
+            renderLabReports();
+          }
         }, 5000);
       }
 
@@ -1088,9 +1354,15 @@
 
         if (section === "overview") renderOverview();
         if (section === "queue") renderLiveQueue();
-        if (section === "appointments") renderAllAppointments();
+        if (section === "appointments") {
+          renderFollowupReminders('appointmentsFollowupSection');
+          renderAllAppointments();
+        }
         if (section === "prescriptions") renderPrescriptions();
-        if (section === "lab-reports") renderLabReports();
+        if (section === "lab-reports") {
+          renderPendingLabPayments();
+          renderLabReports();
+        }
         if (section === "bills") renderBills();
       }
 
@@ -1114,6 +1386,8 @@
         document.getElementById("upcomingCount").innerText = upcoming;
         document.getElementById("completedCount").innerText = completed;
         document.getElementById("totalSpent").innerText = `Rs ${totalSpent}`;
+
+        renderFollowupReminders();
 
         const next = findNextAppointment();
         const nextCard = document.getElementById("nextAppointmentCard");
@@ -1420,6 +1694,176 @@
 
       function closeTokenModal() {
         document.getElementById('tokenModal').classList.remove('active');
+      }
+
+      function renderPendingLabPayments() {
+        const container = document.getElementById('pendingLabPaymentsSection');
+        if (!container) return;
+
+        const pending = pendingLabPayments.filter((p) => p.payment_status === 'pending');
+        if (!pending.length) {
+          container.innerHTML = `
+            <div class="alert alert-info" style="margin-bottom: 1.5rem;">
+              No pending lab test payments. When your doctor orders lab work, fees will appear here for online payment.
+            </div>`;
+          return;
+        }
+
+        const tokenGroups = {};
+        pending.forEach((item) => {
+          const key = item.token_id;
+          if (!tokenGroups[key]) tokenGroups[key] = [];
+          tokenGroups[key].push(item);
+        });
+
+        container.innerHTML = `
+          <h3>Pending Lab Payments</h3>
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Test Name</th>
+                  <th>Report ID</th>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${pending.map((item) => {
+                  const isLoading = labPaymentLoadingId === item.order_id;
+                  const group = tokenGroups[item.token_id] || [];
+                  const canPayAll = group.length > 1;
+                  return `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(item.test_name)}</strong><br>
+                        <small style="color:var(--text-muted);">Token ${escapeHtml(item.token_number)} · ${escapeHtml(item.doctor_name || '')}</small>
+                      </td>
+                      <td>#${item.order_id}</td>
+                      <td>${escapeHtml(formatApptDate(item.date) || item.date_display || item.date)}</td>
+                      <td>${formatLabAmount(item.amount)}</td>
+                      <td>${paymentStatusBadge(item.payment_status)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          class="btn btn-primary btn-sm"
+                          onclick="payLabFeeFromPortal(${item.order_id})"
+                          ${isLoading ? 'disabled' : ''}
+                        >${isLoading ? 'Processing...' : 'Pay Now'}</button>
+                        ${canPayAll ? `<button type="button" class="btn btn-outline btn-sm" style="margin-left:0.35rem;" onclick="payAllLabFeesForToken(${item.token_id})" ${labPaymentLoadingId === 'token-' + item.token_id ? 'disabled' : ''}>Pay all (${group.length})</button>` : ''}
+                      </td>
+                    </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`;
+      }
+
+      async function refreshPendingLabPaymentsFromApi() {
+        const res = await API.patientLabPayments();
+        if (!res.success) return;
+        pendingLabPayments = (res.pending_lab_payments || []).map(mapPendingLabPayment);
+        updatePendingLabBadge();
+      }
+
+      async function payLabFeeFromPortal(orderId) {
+        if (labPaymentLoadingId) return;
+        const item = pendingLabPayments.find((p) => p.order_id === orderId);
+        if (!item || item.payment_status === 'paid') {
+          Toast.show('This lab test has already been paid', 'info');
+          return;
+        }
+        const ok = confirm(`Pay ${formatLabAmount(item.amount)} for ${item.test_name}?`);
+        if (!ok) return;
+
+        labPaymentLoadingId = orderId;
+        renderPendingLabPayments();
+        LoadingOverlay.show();
+        const res = await API.patientPayLabFee(orderId);
+        LoadingOverlay.hide();
+        labPaymentLoadingId = null;
+
+        if (!res.success) {
+          Toast.show(res.error || 'Payment failed', 'error');
+          renderPendingLabPayments();
+          return;
+        }
+
+        pendingLabPayments = pendingLabPayments.map((p) =>
+          p.order_id === orderId
+            ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
+            : p
+        );
+        bills.unshift({
+          id: res.payment_id,
+          appointment_id: item.token_id,
+          token_number: item.token_number,
+          doctor_name: formatDoctorReceiptName(item.doctor_name || ''),
+          doctor_specialization: '',
+          visit_date: formatApptDate(item.date),
+          date: (res.paid_at_display || '').split(',')[0],
+          paid_at_display: res.paid_at_display,
+          description: 'lab fee',
+          amount: res.amount,
+          status: 'paid',
+          reference_number: `patient-lab-${orderId}`,
+        });
+        updatePendingLabBadge();
+        renderPendingLabPayments();
+        Toast.show('Lab payment successful. You have been added to the lab queue.', 'success');
+      }
+
+      async function payAllLabFeesForToken(tokenId) {
+        if (labPaymentLoadingId) return;
+        const items = pendingLabPayments.filter(
+          (p) => p.token_id === tokenId && p.payment_status === 'pending'
+        );
+        if (!items.length) {
+          Toast.show('No pending payments for this visit', 'info');
+          return;
+        }
+        const total = items.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const ok = confirm(`Pay ${formatLabAmount(total)} for all ${items.length} lab test(s) on token ${items[0].token_number}?`);
+        if (!ok) return;
+
+        labPaymentLoadingId = `token-${tokenId}`;
+        renderPendingLabPayments();
+        LoadingOverlay.show();
+        const res = await API.patientPayLabFeesForToken(tokenId);
+        LoadingOverlay.hide();
+        labPaymentLoadingId = null;
+
+        if (!res.success) {
+          Toast.show(res.error || 'Payment failed', 'error');
+          renderPendingLabPayments();
+          return;
+        }
+
+        const paidIds = new Set(items.map((p) => p.order_id));
+        pendingLabPayments = pendingLabPayments.map((p) =>
+          paidIds.has(p.order_id)
+            ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
+            : p
+        );
+        bills.unshift({
+          id: res.payment_ids?.[0] || `token-${tokenId}`,
+          appointment_id: tokenId,
+          token_number: items[0].token_number,
+          doctor_name: formatDoctorReceiptName(items[0].doctor_name || ''),
+          doctor_specialization: '',
+          visit_date: formatApptDate(items[0].date),
+          date: (res.paid_at_display || '').split(',')[0],
+          paid_at_display: res.paid_at_display,
+          description: 'lab fee',
+          amount: res.total_amount,
+          status: 'paid',
+          reference_number: `patient-lab-token-${tokenId}`,
+        });
+        updatePendingLabBadge();
+        renderPendingLabPayments();
+        Toast.show('All lab payments successful. You have been added to the lab queue.', 'success');
       }
 
       function viewLabReport(reportId) {

@@ -154,6 +154,11 @@ const API = {
     patientQueueStatus() { return this.get('/patient/queue-status/'); },
     patientPrescriptions() { return this.get('/patient/prescriptions/'); },
     patientLabReports() { return this.get('/patient/lab-reports/'); },
+    patientLabPayments() { return this.get('/patient/lab-payments/'); },
+    patientPayLabFee(orderId, d) { return this.post(`/patient/lab-pay/${orderId}/`, d || {}); },
+    patientPayLabFeesForToken(tokenId, d) { return this.post(`/patient/lab-pay-token/${tokenId}/`, d || {}); },
+    patientFollowups() { return this.get('/patient/followups/'); },
+    createFollowup(tokenId, d) { return this.post(`/followup/${tokenId}/`, d || {}); },
     patientBills() { return this.get('/patient/bills/'); },
 
     // Reception

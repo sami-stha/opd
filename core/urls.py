@@ -75,6 +75,10 @@ urlpatterns = [
     path('patient/queue-status/', views.patient_queue_status, name='patient-queue-status'),
     path('patient/prescriptions/', views.patient_prescriptions, name='patient-prescriptions'),
     path('patient/lab-reports/', views.patient_lab_reports, name='patient-lab-reports'),
+    path('patient/lab-payments/', views.patient_lab_payments, name='patient-lab-payments'),
+    path('patient/lab-pay/<int:order_id>/', views.patient_pay_lab_fee, name='patient-lab-pay'),
+    path('patient/lab-pay-token/<int:token_id>/', views.patient_pay_lab_fees_for_token, name='patient-lab-pay-token'),
+    path('patient/followups/', views.patient_followups, name='patient-followups'),
     path('patient/bills/', views.patient_bills, name='patient-bills'),
     path('followup/<int:token_id>/', views.create_followup, name='followup'),
 

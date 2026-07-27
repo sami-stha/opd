@@ -10,6 +10,9 @@ from rest_framework.response import Response
 from core import constants as C
 from core.models import LabOrder, Payment, Prescription, Token
 from core.permissions import IsPatient
+from core.services.followup import list_patient_followup_opportunities
+from core.services.lab_orders import normalize_pending_lab_order_names, repair_corrupt_lab_orders
+from core.services.lab_payments import PENDING_LAB_STATUSES
 from core.utils import format_local_time, serialize_token, doctor_name_short, doctor_specialty
 
 
@@ -154,6 +157,29 @@ def patient_journey(request):
         'visit_date': p.token.slot.date.isoformat(),
     } for p in payments_qs]
 
+    repair_corrupt_lab_orders()
+    normalize_pending_lab_order_names()
+    pending_lab_orders = LabOrder.objects.filter(
+        _patient_token_filter(request.user, 'token__'),
+        status__in=PENDING_LAB_STATUSES,
+    ).select_related('token', 'token__slot__doctor').order_by('-ordered_at')
+    pending_lab_payments = [{
+        'order_id': order.id,
+        'token_id': order.token_id,
+        'token_number': order.token.token_number,
+        'test_name': order.test_name,
+        'amount': float(order.fee),
+        'date': order.token.slot.date.isoformat(),
+        'date_display': format_local_time(order.ordered_at, '%d %b %Y'),
+        'doctor_name': str(order.token.slot.doctor),
+        'payment_status': 'pending',
+        'order_status': order.status,
+    } for order in pending_lab_orders]
+
+    followups = list_patient_followup_opportunities(
+        _patient_token_filter(request.user, 'token__'),
+    )
+
     return Response({
         'success': True,
         'today': today.isoformat(),
@@ -162,6 +188,9 @@ def patient_journey(request):
         'journey': journey,
         'prescriptions': prescriptions,
         'lab_reports': lab_reports,
+        'pending_lab_payments': pending_lab_payments,
+        'followups': followups,
+        'followup_actionable_count': sum(1 for f in followups if f.get('can_book')),
         'payments': payments,
         'tokens': [
             serialize_token(t, include_workflow=True)

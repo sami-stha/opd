@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db import models
@@ -12,9 +10,10 @@ from rest_framework.response import Response
 
 from accounts.models import User
 from core import constants as C
-from core.models import DoctorProfile, LabOrder, Payment, Token
+from core.models import DoctorProfile, LabOrder, Token
 from core.permissions import IsReceptionist, IsReceptionistOrAdmin
 from core.services.lab_orders import group_pending_lab_payments, normalize_pending_lab_order_names, repair_corrupt_lab_orders
+from core.services.lab_payments import LabPaymentError, pay_lab_order, pay_lab_orders_for_token
 from core.services.sms import sms_patient_registration
 from core.utils import is_elderly_by_age, patient_id_for_token, resolve_disabled_flag, serialize_token
 
@@ -295,34 +294,17 @@ def reception_lab_payments(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsReceptionistOrAdmin])
-@transaction.atomic
 def pay_lab_fees_for_token(request, token_id):
     """Collect lab fees for all pending orders on a token, then send to lab queue."""
     repair_corrupt_lab_orders(token_id)
-    orders = list(
-        LabOrder.objects.filter(
-            token_id=token_id,
-            status__in=('ordered', 'fee_pending'),
-        ).order_by('ordered_at')
-    )
-    if not orders:
-        return Response({'success': False, 'error': 'No pending lab fees for this patient'}, status=400)
-
-    entries = []
-    total = Decimal('0')
-    for order in orders:
-        amount = Decimal(str(order.fee))
-        Payment.objects.create(
-            token=order.token,
-            payment_type='lab_fee',
-            amount=amount,
-            status='paid',
-            collected_by=request.user,
-            paid_at=timezone.now(),
-            reference_number=request.data.get('reference_number', f'lab-{order.id}'),
+    try:
+        orders, payments, entries, total = pay_lab_orders_for_token(
+            token_id,
+            request.user,
+            request.data.get('reference_number'),
         )
-        entries.append(order.mark_fee_paid())
-        total += amount
+    except LabPaymentError as exc:
+        return Response({'success': False, 'error': exc.message}, status=exc.status_code)
 
     return Response({
         'success': True,
@@ -331,42 +313,30 @@ def pay_lab_fees_for_token(request, token_id):
         'orders_paid': len(orders),
         'total_amount': float(total),
         'queue_entry_ids': [e.id for e in entries],
+        'payment_ids': [p.id for p in payments],
     })
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsReceptionistOrAdmin])
-@transaction.atomic
 def pay_lab_fee(request, order_id):
     try:
-        order = LabOrder.objects.get(id=order_id)
-    except LabOrder.DoesNotExist:
-        return Response({'success': False, 'error': 'Lab order not found'}, status=404)
-
-    if order.status not in ('ordered', 'fee_pending'):
-        return Response(
-            {'success': False, 'error': f'Lab fee already processed (status: {order.status})'},
-            status=400,
+        order, payment, entry = pay_lab_order(
+            order_id,
+            request.data.get('amount', None),
+            request.user,
+            request.data.get('reference_number'),
         )
+    except LabPaymentError as exc:
+        return Response({'success': False, 'error': exc.message}, status=exc.status_code)
 
-    amount = Decimal(str(request.data.get('amount', order.fee)))
-    Payment.objects.create(
-        token=order.token,
-        payment_type='lab_fee',
-        amount=amount,
-        status='paid',
-        collected_by=request.user,
-        paid_at=timezone.now(),
-        reference_number=request.data.get('reference_number', f'lab-{order.id}'),
-    )
-    entry = order.mark_fee_paid()
-    order.refresh_from_db()
     return Response({
         'success': True,
         'message': 'Lab fee paid — patient sent to lab queue',
         'order_id': order.id,
         'status': order.status,
         'queue_entry_id': entry.id,
+        'payment_id': payment.id,
     })
 
 
