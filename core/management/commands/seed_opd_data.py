@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.hashers import make_password
 
 from accounts.models import User
-from core.models import DoctorProfile
+from core.models import DoctorProfile, FollowupRule
 from core.utils import ensure_today_tomorrow_slots
 
 
@@ -52,6 +52,9 @@ class Command(BaseCommand):
                     'avg_consultation_time': avg,
                 },
             )
+
+        FollowupRule.objects.filter(is_active=True).update(is_active=False)
+        FollowupRule.objects.create(exempt_within_days=7, is_active=True)
 
         ensure_today_tomorrow_slots()
         self.stdout.write(self.style.SUCCESS('Seed data created. Run server and login with staff accounts.'))

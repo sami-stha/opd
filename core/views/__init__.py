@@ -27,6 +27,7 @@ from .patient_portal import (
     get_patient_tokens, patient_queue_status, patient_prescriptions,
     patient_lab_reports, patient_lab_payments, patient_pay_lab_fee, patient_pay_lab_fees_for_token,
     patient_bills, create_followup, patient_followups,
+    patient_followup_booking_context, patient_book_followup,
 )
 from .patient_journey import patient_journey
 from .sync import system_sync

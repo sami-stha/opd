@@ -79,6 +79,8 @@ urlpatterns = [
     path('patient/lab-pay/<int:order_id>/', views.patient_pay_lab_fee, name='patient-lab-pay'),
     path('patient/lab-pay-token/<int:token_id>/', views.patient_pay_lab_fees_for_token, name='patient-lab-pay-token'),
     path('patient/followups/', views.patient_followups, name='patient-followups'),
+    path('patient/followup-booking/<int:token_id>/', views.patient_followup_booking_context, name='patient-followup-booking'),
+    path('patient/followup-book/', views.patient_book_followup, name='patient-followup-book'),
     path('patient/bills/', views.patient_bills, name='patient-bills'),
     path('followup/<int:token_id>/', views.create_followup, name='followup'),
 

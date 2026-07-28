@@ -202,6 +202,39 @@
         background: var(--success-bg);
         color: var(--success);
       }
+      .lab-payment-method {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .lab-payment-method:hover,
+      .lab-payment-method.selected {
+        border-color: var(--secondary);
+        background: rgba(59, 151, 151, 0.05);
+      }
+      .lab-payment-summary {
+        background: var(--background);
+        border-radius: var(--radius);
+        padding: 1rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+      }
+      .lab-payment-summary-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.35rem;
+      }
+      .lab-payment-summary-total {
+        border-top: 1px dashed var(--border);
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        font-weight: 700;
+      }
       .sidebar-nav-badge {
         display: inline-flex;
         align-items: center;
@@ -506,9 +539,12 @@
             >
               <span data-icon="pharmacy" data-icon-size="18"></span> Prescriptions
             </div>
+            <div class="sidebar-nav-item" data-nav="lab-payments" onclick="showSection('lab-payments', this)">
+              <span data-icon="flask" data-icon-size="18"></span> Lab Payments
+              <span class="sidebar-nav-badge" id="pendingLabBadge" style="display:none;">0</span>
+            </div>
             <div class="sidebar-nav-item" data-nav="lab-reports" onclick="showSection('lab-reports', this)">
               <span data-icon="microscope" data-icon-size="18"></span> Lab Reports
-              <span class="sidebar-nav-badge" id="pendingLabBadge" style="display:none;">0</span>
             </div>
             <div class="sidebar-nav-item" data-nav="bills" onclick="showSection('bills', this)">
               <span data-icon="wallet" data-icon-size="18"></span> Bills & Payments
@@ -639,10 +675,23 @@
           <div id="prescriptionsList"></div>
         </div>
 
+        <!-- Lab Payments Section -->
+        <div id="labPaymentsSection" style="display: none">
+          <div class="card pending-lab-section">
+            <h3 style="margin-bottom: 0.5rem;">Pending Lab Payments</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+              Pay lab test fees here before your sample is processed. Uses the same payment records as the hospital reception desk.
+            </p>
+            <div id="pendingLabPaymentsContent"></div>
+          </div>
+          <div class="card" style="margin-top: 1rem;">
+            <h3 style="margin-bottom: 1rem;">Lab Payment History</h3>
+            <div id="paidLabPaymentsContent"></div>
+          </div>
+        </div>
+
         <!-- Lab Reports Section -->
         <div id="labReportsSection" style="display: none">
-          <div id="pendingLabPaymentsSection" class="pending-lab-section"></div>
-          <h3 style="margin: 0 0 1rem;">Completed Reports</h3>
           <div id="labReportsList"></div>
         </div>
 
@@ -665,6 +714,18 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Lab Payment Gateway Modal (mock eSewa / Khalti) -->
+    <div id="labPaymentModal" class="modal">
+      <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-header">
+          <h3>Pay Lab Test Fee</h3>
+          <button type="button" onclick="closeLabPaymentModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;">&times;</button>
+        </div>
+        <div class="modal-body" id="labPaymentModalBody"></div>
+        <div class="modal-footer" id="labPaymentModalFooter"></div>
       </div>
     </div>
 
@@ -755,9 +816,10 @@
       let labReports = [];
       let pendingLabPayments = [];
       let followupReminders = [];
-      let followupBookingId = null;
       let bills = [];
       let labPaymentLoadingId = null;
+      let labPaymentContext = null;
+      let selectedLabPaymentMethod = null;
       let currentPatientName = 'Patient';
       let queuePollTimer = null;
       let dashboardPollTimer = null;
@@ -979,12 +1041,10 @@
         }
         if (!f.can_book) return '';
 
-        const exemptDays = f.exempt_within_days || 3;
-        const bookDate = f.recommended_booking_date;
+        const exemptDays = f.exempt_within_days || 7;
         const exemptLabel = f.fee_exempt_on_recommended_date
           ? `Free follow-up (fee exempt within ${exemptDays} days)`
           : 'Consultation fee applies';
-        const loading = followupBookingId === f.original_token_id;
 
         return `
           <div class="followup-reminder-item">
@@ -999,12 +1059,10 @@
                 ${f.fee_exempt_available ? `<div style="font-size:0.8rem; margin-top:0.5rem; color:#92400e;">Fee exemption ends ${escapeHtml(f.exemption_end_display)} (${f.days_until_exemption_ends} day(s) left)</div>` : ''}
                 <span class="followup-exempt-badge">${escapeHtml(exemptLabel)}</span>
               </div>
-              <button
-                type="button"
+              <a
+                href="followup-booking.html?original_token_id=${f.original_token_id}"
                 class="btn btn-primary"
-                onclick="bookFollowupFromDashboard(${f.original_token_id}, '${bookDate || ''}')"
-                ${loading ? 'disabled' : ''}
-              >${loading ? 'Booking...' : f.fee_exempt_on_recommended_date ? 'Book Free Follow-up' : 'Book Follow-up'}</button>
+              >${f.fee_exempt_on_recommended_date ? 'Book Free Follow-up' : 'Book Follow-up'}</a>
             </div>
           </div>`;
       }
@@ -1026,54 +1084,10 @@
           <h3>${bookable.length ? 'Follow-up Reminder' : 'Follow-up Status'}</h3>
           <p style="margin:0; font-size:0.9rem; color:#92400e;">
             ${bookable.length
-              ? `Your doctor scheduled a follow-up. Book within ${bookable[0]?.exempt_within_days || 3} days of your visit for a fee-exempt consultation.`
+              ? `Your doctor scheduled a follow-up. Book within ${bookable[0]?.exempt_within_days || 7} days of your visit for a fee-exempt consultation.`
               : 'Your follow-up appointments'}
           </p>
           ${actionable.map(renderFollowupItemHtml).join('')}`;
-      }
-
-      async function bookFollowupFromDashboard(originalTokenId, recommendedDate) {
-        if (followupBookingId) return;
-        const item = followupReminders.find((f) => f.original_token_id === originalTokenId);
-        if (!item || !item.can_book) {
-          Toast.show('This follow-up cannot be booked right now', 'info');
-          return;
-        }
-
-        const bookDate = recommendedDate || item.recommended_booking_date;
-        const dateLabel = formatApptDate(bookDate);
-        const feeNote = item.fee_exempt_on_recommended_date
-          ? 'Your consultation fee will be waived.'
-          : 'Consultation fee will apply.';
-        const ok = confirm(`Book follow-up with ${item.doctor_name} for ${dateLabel}? ${feeNote}`);
-        if (!ok) return;
-
-        followupBookingId = originalTokenId;
-        renderFollowupReminders();
-        renderFollowupReminders('appointmentsFollowupSection');
-        LoadingOverlay.show();
-        const payload = bookDate ? { date: bookDate } : {};
-        const res = await API.createFollowup(originalTokenId, payload);
-        LoadingOverlay.hide();
-        followupBookingId = null;
-
-        if (!res.success) {
-          Toast.show(res.error || 'Could not book follow-up', 'error');
-          renderFollowupReminders();
-          renderFollowupReminders('appointmentsFollowupSection');
-          return;
-        }
-
-        await refreshJourneyFromApi();
-        renderFollowupReminders();
-        renderFollowupReminders('appointmentsFollowupSection');
-        renderOverview();
-        Toast.show(
-          res.fee_exempted
-            ? `Free follow-up booked! Token ${res.followup_token}`
-            : `Follow-up booked. Token ${res.followup_token}. Please pay at reception.`,
-          'success'
-        );
       }
 
       function formatLabAmount(amount) {
@@ -1300,6 +1314,7 @@
           const overviewVisible = document.getElementById('overviewSection')?.style.display !== 'none';
           const apptVisible = document.getElementById('appointmentsSection')?.style.display !== 'none';
           const queueVisible = document.getElementById('queueSection')?.style.display !== 'none';
+          const labPayVisible = document.getElementById('labPaymentsSection')?.style.display !== 'none';
           const labVisible = document.getElementById('labReportsSection')?.style.display !== 'none';
           if (overviewVisible) renderOverview();
           if (apptVisible) {
@@ -1307,10 +1322,8 @@
             renderAllAppointments();
           }
           if (queueVisible) await renderLiveQueue();
-          if (labVisible) {
-            renderPendingLabPayments();
-            renderLabReports();
-          }
+          if (labPayVisible) renderLabPaymentsSection();
+          if (labVisible) renderLabReports();
         }, 5000);
       }
 
@@ -1327,6 +1340,7 @@
           queue: 'queueSection',
           appointments: 'appointmentsSection',
           prescriptions: 'prescriptionsSection',
+          'lab-payments': 'labPaymentsSection',
           'lab-reports': 'labReportsSection',
           bills: 'billsSection',
         };
@@ -1343,6 +1357,7 @@
           queue: "Live Queue Status",
           appointments: "My Appointments",
           prescriptions: "Prescriptions",
+          "lab-payments": "Lab Payments",
           "lab-reports": "Lab Reports",
           bills: "Bills & Payments",
         };
@@ -1359,10 +1374,8 @@
           renderAllAppointments();
         }
         if (section === "prescriptions") renderPrescriptions();
-        if (section === "lab-reports") {
-          renderPendingLabPayments();
-          renderLabReports();
-        }
+        if (section === "lab-payments") renderLabPaymentsSection();
+        if (section === "lab-reports") renderLabReports();
         if (section === "bills") renderBills();
       }
 
@@ -1697,14 +1710,14 @@
       }
 
       function renderPendingLabPayments() {
-        const container = document.getElementById('pendingLabPaymentsSection');
+        const container = document.getElementById('pendingLabPaymentsContent');
         if (!container) return;
 
         const pending = pendingLabPayments.filter((p) => p.payment_status === 'pending');
         if (!pending.length) {
           container.innerHTML = `
-            <div class="alert alert-info" style="margin-bottom: 1.5rem;">
-              No pending lab test payments. When your doctor orders lab work, fees will appear here for online payment.
+            <div class="alert alert-info">
+              No pending lab test payments. When your doctor orders lab work, fees will appear here.
             </div>`;
           return;
         }
@@ -1717,7 +1730,6 @@
         });
 
         container.innerHTML = `
-          <h3>Pending Lab Payments</h3>
           <div class="table-container">
             <table class="table">
               <thead>
@@ -1726,7 +1738,7 @@
                   <th>Report ID</th>
                   <th>Date</th>
                   <th>Amount</th>
-                  <th>Status</th>
+                  <th>Payment Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -1749,10 +1761,10 @@
                         <button
                           type="button"
                           class="btn btn-primary btn-sm"
-                          onclick="payLabFeeFromPortal(${item.order_id})"
+                          onclick="openLabPaymentModal(${item.order_id})"
                           ${isLoading ? 'disabled' : ''}
                         >${isLoading ? 'Processing...' : 'Pay Now'}</button>
-                        ${canPayAll ? `<button type="button" class="btn btn-outline btn-sm" style="margin-left:0.35rem;" onclick="payAllLabFeesForToken(${item.token_id})" ${labPaymentLoadingId === 'token-' + item.token_id ? 'disabled' : ''}>Pay all (${group.length})</button>` : ''}
+                        ${canPayAll ? `<button type="button" class="btn btn-outline btn-sm" style="margin-left:0.35rem;" onclick="openLabPayAllModal(${item.token_id})" ${labPaymentLoadingId === 'token-' + item.token_id ? 'disabled' : ''}>Pay all (${group.length})</button>` : ''}
                       </td>
                     </tr>`;
                 }).join('')}
@@ -1761,62 +1773,70 @@
           </div>`;
       }
 
-      async function refreshPendingLabPaymentsFromApi() {
-        const res = await API.patientLabPayments();
-        if (!res.success) return;
-        pendingLabPayments = (res.pending_lab_payments || []).map(mapPendingLabPayment);
-        updatePendingLabBadge();
+      function renderPaidLabPayments() {
+        const container = document.getElementById('paidLabPaymentsContent');
+        if (!container) return;
+
+        const paidLabBills = bills.filter((b) => {
+          const desc = String(b.description || '').toLowerCase();
+          return desc.includes('lab') && String(b.status || '').toLowerCase() === 'paid';
+        });
+
+        if (!paidLabBills.length) {
+          container.innerHTML = '<div class="alert alert-info">No lab payments recorded yet.</div>';
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Token</th>
+                  <th>Visit Date</th>
+                  <th>Amount</th>
+                  <th>Payment Status</th>
+                  <th>Payment Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${paidLabBills.map((b) => `
+                  <tr>
+                    <td>${escapeHtml(b.description || 'Lab fee')}</td>
+                    <td>${escapeHtml(b.token_number || '—')}</td>
+                    <td>${escapeHtml(b.visit_date || b.date || '—')}</td>
+                    <td>Rs ${Number(b.amount || 0).toLocaleString('en-NP')}</td>
+                    <td>${paymentStatusBadge('paid')}</td>
+                    <td>${escapeHtml(b.paid_at_display || b.date || '—')}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
       }
 
-      async function payLabFeeFromPortal(orderId) {
-        if (labPaymentLoadingId) return;
+      function renderLabPaymentsSection() {
+        renderPendingLabPayments();
+        renderPaidLabPayments();
+      }
+
+      function labPaymentMethodLabel(method) {
+        return method === 'khalti' ? 'Khalti' : 'eSewa';
+      }
+
+      function openLabPaymentModal(orderId) {
         const item = pendingLabPayments.find((p) => p.order_id === orderId);
         if (!item || item.payment_status === 'paid') {
           Toast.show('This lab test has already been paid', 'info');
           return;
         }
-        const ok = confirm(`Pay ${formatLabAmount(item.amount)} for ${item.test_name}?`);
-        if (!ok) return;
-
-        labPaymentLoadingId = orderId;
-        renderPendingLabPayments();
-        LoadingOverlay.show();
-        const res = await API.patientPayLabFee(orderId);
-        LoadingOverlay.hide();
-        labPaymentLoadingId = null;
-
-        if (!res.success) {
-          Toast.show(res.error || 'Payment failed', 'error');
-          renderPendingLabPayments();
-          return;
-        }
-
-        pendingLabPayments = pendingLabPayments.map((p) =>
-          p.order_id === orderId
-            ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
-            : p
-        );
-        bills.unshift({
-          id: res.payment_id,
-          appointment_id: item.token_id,
-          token_number: item.token_number,
-          doctor_name: formatDoctorReceiptName(item.doctor_name || ''),
-          doctor_specialization: '',
-          visit_date: formatApptDate(item.date),
-          date: (res.paid_at_display || '').split(',')[0],
-          paid_at_display: res.paid_at_display,
-          description: 'lab fee',
-          amount: res.amount,
-          status: 'paid',
-          reference_number: `patient-lab-${orderId}`,
-        });
-        updatePendingLabBadge();
-        renderPendingLabPayments();
-        Toast.show('Lab payment successful. You have been added to the lab queue.', 'success');
+        labPaymentContext = { mode: 'single', orderId, tokenId: item.token_id, items: [item], total: Number(item.amount || 0) };
+        selectedLabPaymentMethod = null;
+        renderLabPaymentModal();
+        document.getElementById('labPaymentModal').classList.add('active');
       }
 
-      async function payAllLabFeesForToken(tokenId) {
-        if (labPaymentLoadingId) return;
+      function openLabPayAllModal(tokenId) {
         const items = pendingLabPayments.filter(
           (p) => p.token_id === tokenId && p.payment_status === 'pending'
         );
@@ -1825,45 +1845,185 @@
           return;
         }
         const total = items.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-        const ok = confirm(`Pay ${formatLabAmount(total)} for all ${items.length} lab test(s) on token ${items[0].token_number}?`);
-        if (!ok) return;
+        labPaymentContext = { mode: 'token', tokenId, items, total };
+        selectedLabPaymentMethod = null;
+        renderLabPaymentModal();
+        document.getElementById('labPaymentModal').classList.add('active');
+      }
 
-        labPaymentLoadingId = `token-${tokenId}`;
-        renderPendingLabPayments();
+      function closeLabPaymentModal() {
+        document.getElementById('labPaymentModal').classList.remove('active');
+        labPaymentContext = null;
+        selectedLabPaymentMethod = null;
+      }
+
+      function selectLabPaymentMethod(method) {
+        selectedLabPaymentMethod = method;
+        renderLabPaymentModal();
+      }
+
+      function renderLabPaymentModal() {
+        const body = document.getElementById('labPaymentModalBody');
+        const footer = document.getElementById('labPaymentModalFooter');
+        if (!body || !footer || !labPaymentContext) return;
+
+        const ctx = labPaymentContext;
+        const total = formatLabAmount(ctx.total);
+        const testsHtml = ctx.items
+          .map((item) => `<div class="lab-payment-summary-row"><span>${escapeHtml(item.test_name)}</span><span>${formatLabAmount(item.amount)}</span></div>`)
+          .join('');
+
+        body.innerHTML = `
+          <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">
+            Select a payment method to complete your lab test fee (mock gateway — same flow as appointment booking).
+          </p>
+          <div class="lab-payment-summary">
+            <div class="lab-payment-summary-row"><span>Token</span><span>${escapeHtml(ctx.items[0]?.token_number || '—')}</span></div>
+            ${testsHtml}
+            <div class="lab-payment-summary-row lab-payment-summary-total"><span>Total</span><span>${total}</span></div>
+          </div>
+          <h4 style="margin:0 0 0.75rem; font-size:0.95rem;">Select Payment Method</h4>
+          <div class="lab-payment-method ${selectedLabPaymentMethod === 'esewa' ? 'selected' : ''}" onclick="selectLabPaymentMethod('esewa')">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; gap:1rem; align-items:center;">
+                <span class="payment-icon-box" data-icon="card" data-icon-size="22"></span>
+                <div><strong>eSewa</strong><div style="font-size:0.75rem; color:var(--text-muted);">Nepal's Digital Wallet</div></div>
+              </div>
+              <strong style="color:var(--secondary);">${total}</strong>
+            </div>
+          </div>
+          <div class="lab-payment-method ${selectedLabPaymentMethod === 'khalti' ? 'selected' : ''}" onclick="selectLabPaymentMethod('khalti')">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; gap:1rem; align-items:center;">
+                <span class="payment-icon-box" data-icon="bank" data-icon-size="22"></span>
+                <div><strong>Khalti</strong><div style="font-size:0.75rem; color:var(--text-muted);">Digital Wallet</div></div>
+              </div>
+              <strong style="color:var(--secondary);">${total}</strong>
+            </div>
+          </div>`;
+
+        footer.innerHTML = `
+          <button type="button" class="btn btn-secondary" onclick="closeLabPaymentModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="processLabGatewayPayment()" ${labPaymentLoadingId ? 'disabled' : ''}>Pay Now →</button>`;
+
+        if (typeof MedIcons !== 'undefined' && MedIcons.inject) MedIcons.inject(body);
+      }
+
+      function showLabPaymentSuccess(res, method) {
+        const body = document.getElementById('labPaymentModalBody');
+        const footer = document.getElementById('labPaymentModalFooter');
+        const amount = res.total_amount != null ? res.total_amount : res.amount;
+        const ref = res.reference_number || `${method}-lab`;
+        body.innerHTML = `
+          <div class="alert alert-success" style="margin-bottom:1rem;">
+            <strong>Payment successful</strong><br>
+            Your lab test fee has been paid via ${escapeHtml(labPaymentMethodLabel(method))}.
+          </div>
+          <div class="lab-payment-summary">
+            <div class="lab-payment-summary-row"><span>Amount paid</span><span>${formatLabAmount(amount)}</span></div>
+            <div class="lab-payment-summary-row"><span>Payment method</span><span>${escapeHtml(labPaymentMethodLabel(method))}</span></div>
+            <div class="lab-payment-summary-row"><span>Reference</span><span>${escapeHtml(ref)}</span></div>
+            <div class="lab-payment-summary-row"><span>Date</span><span>${escapeHtml(res.paid_at_display || '—')}</span></div>
+          </div>
+          <p style="font-size:0.85rem; color:var(--text-muted);">You have been added to the lab queue. Proceed to the lab when called.</p>`;
+        footer.innerHTML = `<button type="button" class="btn btn-primary" onclick="closeLabPaymentModal()">Done</button>`;
+      }
+
+      async function processLabGatewayPayment() {
+        if (!labPaymentContext) return;
+        if (!selectedLabPaymentMethod) {
+          Toast.show('Select a payment method', 'error');
+          return;
+        }
+        if (labPaymentLoadingId) return;
+
+        const method = selectedLabPaymentMethod;
+        const ctx = labPaymentContext;
+        labPaymentLoadingId = ctx.mode === 'single' ? ctx.orderId : `token-${ctx.tokenId}`;
+        renderLabPaymentModal();
+
+        Toast.show('Processing payment...', 'info');
         LoadingOverlay.show();
-        const res = await API.patientPayLabFeesForToken(tokenId);
+
+        const payload = {
+          payment_method: method,
+          reference_number:
+            ctx.mode === 'single'
+              ? `${method}-lab-${ctx.orderId}`
+              : `${method}-lab-token-${ctx.tokenId}`,
+        };
+
+        let res;
+        if (ctx.mode === 'single') {
+          res = await API.patientPayLabFee(ctx.orderId, payload);
+        } else {
+          res = await API.patientPayLabFeesForToken(ctx.tokenId, payload);
+        }
+
         LoadingOverlay.hide();
         labPaymentLoadingId = null;
 
         if (!res.success) {
           Toast.show(res.error || 'Payment failed', 'error');
-          renderPendingLabPayments();
+          renderLabPaymentModal();
           return;
         }
 
-        const paidIds = new Set(items.map((p) => p.order_id));
-        pendingLabPayments = pendingLabPayments.map((p) =>
-          paidIds.has(p.order_id)
-            ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
-            : p
-        );
-        bills.unshift({
-          id: res.payment_ids?.[0] || `token-${tokenId}`,
-          appointment_id: tokenId,
-          token_number: items[0].token_number,
-          doctor_name: formatDoctorReceiptName(items[0].doctor_name || ''),
-          doctor_specialization: '',
-          visit_date: formatApptDate(items[0].date),
-          date: (res.paid_at_display || '').split(',')[0],
-          paid_at_display: res.paid_at_display,
-          description: 'lab fee',
-          amount: res.total_amount,
-          status: 'paid',
-          reference_number: `patient-lab-token-${tokenId}`,
-        });
+        if (ctx.mode === 'single') {
+          const item = ctx.items[0];
+          pendingLabPayments = pendingLabPayments.map((p) =>
+            p.order_id === ctx.orderId
+              ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
+              : p
+          );
+          bills.unshift({
+            id: res.payment_id,
+            appointment_id: item.token_id,
+            token_number: item.token_number,
+            doctor_name: formatDoctorReceiptName(item.doctor_name || ''),
+            doctor_specialization: '',
+            visit_date: formatApptDate(item.date),
+            date: (res.paid_at_display || '').split(',')[0],
+            paid_at_display: res.paid_at_display,
+            description: 'lab fee',
+            amount: res.amount,
+            status: 'paid',
+            reference_number: res.reference_number || payload.reference_number,
+          });
+        } else {
+          const paidIds = new Set(ctx.items.map((p) => p.order_id));
+          pendingLabPayments = pendingLabPayments.map((p) =>
+            paidIds.has(p.order_id)
+              ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
+              : p
+          );
+          bills.unshift({
+            id: res.payment_ids?.[0] || `token-${ctx.tokenId}`,
+            appointment_id: ctx.tokenId,
+            token_number: ctx.items[0].token_number,
+            doctor_name: formatDoctorReceiptName(ctx.items[0].doctor_name || ''),
+            doctor_specialization: '',
+            visit_date: formatApptDate(ctx.items[0].date),
+            date: (res.paid_at_display || '').split(',')[0],
+            paid_at_display: res.paid_at_display,
+            description: 'lab fee',
+            amount: res.total_amount,
+            status: 'paid',
+            reference_number: payload.reference_number,
+          });
+        }
+
         updatePendingLabBadge();
-        renderPendingLabPayments();
-        Toast.show('All lab payments successful. You have been added to the lab queue.', 'success');
+        renderLabPaymentsSection();
+        showLabPaymentSuccess(res, method);
+        Toast.show('Lab payment successful', 'success');
+      }
+
+      async function refreshPendingLabPaymentsFromApi() {
+        const res = await API.patientLabPayments();
+        if (!res.success) return;
+        pendingLabPayments = (res.pending_lab_payments || []).map(mapPendingLabPayment);
+        updatePendingLabBadge();
       }
 
       function viewLabReport(reportId) {

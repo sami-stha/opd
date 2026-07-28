@@ -159,6 +159,8 @@ const API = {
     patientPayLabFeesForToken(tokenId, d) { return this.post(`/patient/lab-pay-token/${tokenId}/`, d || {}); },
     patientFollowups() { return this.get('/patient/followups/'); },
     createFollowup(tokenId, d) { return this.post(`/followup/${tokenId}/`, d || {}); },
+    patientFollowupBookingContext(tokenId) { return this.get(`/patient/followup-booking/${tokenId}/`); },
+    patientBookFollowup(d) { return this.post('/patient/followup-book/', d || {}); },
     patientBills() { return this.get('/patient/bills/'); },
 
     // Reception

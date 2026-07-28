@@ -766,7 +766,7 @@ class FollowupRule(models.Model):
     should be active at a time — enforced in clean(), not at DB level,
     since this is a tiny lookup table managed entirely from admin.
     """
-    exempt_within_days = models.IntegerField(default=3)
+    exempt_within_days = models.IntegerField(default=7)
     is_active = models.BooleanField(default=True)
     updated_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True,
@@ -780,11 +780,12 @@ class FollowupRule(models.Model):
 
     @classmethod
     def check_exemption(cls, original_token, new_visit_date):
-        rule = cls.get_active()
-        if not rule or not original_token:
+        if not original_token:
             return False
+        rule = cls.get_active()
+        exempt_days = rule.exempt_within_days if rule else 7
         days_diff = (new_visit_date - original_token.slot.date).days
-        return 0 <= days_diff <= rule.exempt_within_days
+        return 0 <= days_diff <= exempt_days
 
     def __str__(self):
         return f"Follow-up exemption: {self.exempt_within_days} days ({'active' if self.is_active else 'inactive'})"

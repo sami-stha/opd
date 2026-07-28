@@ -5,7 +5,12 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from core.models import Consultation, ConsultationSlot, FollowupRule, Payment, Token
-from core.utils import consultation_fee_with_charge
+from core.utils import (
+    consultation_fee_with_charge,
+    duplicate_slot_booking_error,
+    patient_has_active_slot_booking,
+    serialize_slot,
+)
 
 
 class FollowupBookingError(Exception):
@@ -16,7 +21,7 @@ class FollowupBookingError(Exception):
 
 def get_exempt_within_days():
     rule = FollowupRule.get_active()
-    return rule.exempt_within_days if rule else 3
+    return rule.exempt_within_days if rule else 7
 
 
 def exemption_end_date(original_token):
@@ -44,7 +49,10 @@ def get_booked_followup(original_token_id):
 
 
 def is_fee_exempt(original_token, visit_date):
-    return FollowupRule.check_exemption(original_token, visit_date)
+    if not original_token:
+        return False
+    days_diff = (visit_date - original_token.slot.date).days
+    return 0 <= days_diff <= get_exempt_within_days()
 
 
 def _parse_visit_date(value):
@@ -149,6 +157,130 @@ def book_followup(original_token, visit_date, booked_by=None):
     return followup, fee_exempt
 
 
+def book_followup_via_slot(original_token, slot, booked_by, payment_method=None):
+    """Book follow-up through normal slot selection (same workflow as online booking)."""
+    if followup_already_booked(original_token.id):
+        existing = get_booked_followup(original_token.id)
+        raise FollowupBookingError(
+            f'Follow-up already booked (token {existing.token_number})',
+            400,
+        )
+
+    consult = getattr(original_token, 'consultation', None)
+    if not consult or not consult.followup_date:
+        raise FollowupBookingError('No follow-up was scheduled for this visit', 400)
+
+    today = timezone.localdate()
+    if today > exemption_end_date(original_token):
+        raise FollowupBookingError(
+            'Follow-up fee exemption period has ended. Please book a regular appointment.',
+            400,
+        )
+
+    if slot.doctor_id != original_token.slot.doctor_id:
+        raise FollowupBookingError('Follow-up must be booked with the same doctor', 400)
+
+    from core.services.slot_config import is_slot_bookable
+    if not is_slot_bookable(slot):
+        raise FollowupBookingError('Selected slot is not available', 400)
+
+    if patient_has_active_slot_booking(
+        slot,
+        patient_user=original_token.patient,
+        patient_phone=original_token.patient_phone,
+    ):
+        raise FollowupBookingError(duplicate_slot_booking_error(slot), 400)
+
+    fee_exempt = is_fee_exempt(original_token, slot.date)
+    try:
+        followup = Token.objects.create(
+            slot=slot,
+            patient=original_token.patient,
+            patient_name=original_token.patient_name,
+            patient_age=original_token.patient_age,
+            patient_phone=original_token.patient_phone,
+            patient_address=original_token.patient_address,
+            is_followup=True,
+            fee_exempted=fee_exempt,
+            original_token=original_token,
+        )
+    except ValidationError as exc:
+        raise FollowupBookingError(str(exc), 400)
+
+    if fee_exempt:
+        _record_followup_payment(followup, booked_by, True)
+    else:
+        method = (payment_method or '').lower().strip()
+        if method not in ('esewa', 'khalti'):
+            raise FollowupBookingError('Payment method required (eSewa or Khalti)', 400)
+        _, _, total = consultation_fee_with_charge()
+        Payment.objects.create(
+            token=followup,
+            payment_type='consultation_fee',
+            amount=total,
+            status='paid',
+            collected_by=booked_by,
+            paid_at=timezone.now(),
+            reference_number=f'{method}-{followup.id}',
+        )
+
+    from core.services.sms import sms_token_booking
+    from core.utils import format_local_time
+    sms_token_booking(
+        followup.token_number,
+        format_local_time(followup.estimated_time) or '',
+        followup.patient_phone,
+        followup.slot.start_time,
+    )
+
+    return followup, fee_exempt
+
+
+def get_followup_booking_context(original_token):
+    """Slots and fee-exemption info for the follow-up booking portal."""
+    today = timezone.localdate()
+    tomorrow = today + timedelta(days=1)
+    consult = getattr(original_token, 'consultation', None)
+    doctor = original_token.slot.doctor
+
+    from core.services.workflow import expire_all_ended_slots
+    from core.utils import ensure_today_tomorrow_slots
+
+    expire_all_ended_slots()
+    ensure_today_tomorrow_slots()
+
+    slots = ConsultationSlot.objects.filter(
+        doctor=doctor,
+        date__in=[today, tomorrow],
+    ).select_related('doctor__user')
+
+    slots_data = [serialize_slot(s) for s in slots]
+    grouped = {
+        'today': [s for s in slots_data if s['date'] == today.isoformat()],
+        'tomorrow': [s for s in slots_data if s['date'] == tomorrow.isoformat()],
+    }
+
+    return {
+        'original_token_id': original_token.id,
+        'token_number': original_token.token_number,
+        'doctor_id': doctor.id,
+        'doctor_name': str(doctor),
+        'followup_date': consult.followup_date.isoformat() if consult and consult.followup_date else None,
+        'followup_instructions': (consult.followup_instructions or '') if consult else '',
+        'diagnosis': (consult.diagnosis or '') if consult else '',
+        'exempt_within_days': get_exempt_within_days(),
+        'exemption_end_date': exemption_end_date(original_token).isoformat(),
+        'days_until_exemption_ends': max(0, (exemption_end_date(original_token) - today).days),
+        'fee_exempt_today': is_fee_exempt(original_token, today),
+        'fee_exempt_tomorrow': is_fee_exempt(original_token, tomorrow),
+        'already_booked': followup_already_booked(original_token.id),
+        'slots': slots_data,
+        'grouped': grouped,
+        'today': today.isoformat(),
+        'tomorrow': tomorrow.isoformat(),
+    }
+
+
 def serialize_followup_opportunity(consult):
     """Build patient-portal payload for one schedulable follow-up."""
     original = consult.token
@@ -172,14 +304,6 @@ def serialize_followup_opportunity(consult):
         recommended is not None and is_fee_exempt(original, recommended)
     )
 
-    show_reminder = False
-    if booked:
-        show_reminder = False
-    elif scheduled and scheduled >= today:
-        show_reminder = True
-    elif within_fee_window:
-        show_reminder = True
-
     return {
         'original_token_id': original.id,
         'token_number': original.token_number,
@@ -197,7 +321,7 @@ def serialize_followup_opportunity(consult):
         'fee_exempt_available': within_fee_window,
         'fee_exempt_on_recommended_date': fee_exempt_on_recommended,
         'already_booked': booked is not None,
-        'can_book': show_reminder and recommended is not None,
+        'can_book': (not booked) and within_fee_window and recommended is not None,
         'recommended_booking_date': recommended.isoformat() if recommended else None,
         'booked_followup': {
             'token_id': booked.id,
@@ -227,10 +351,11 @@ def list_patient_followup_opportunities(patient_token_filter_q):
 
     opportunities = []
     for consult in consultations:
+        original = consult.token
+        if today > exemption_end_date(original):
+            continue
         item = serialize_followup_opportunity(consult)
-        if item['already_booked'] or item['can_book'] or (
-            consult.followup_date and consult.followup_date >= today
-        ):
+        if item['already_booked'] or item['can_book']:
             opportunities.append(item)
 
     return opportunities

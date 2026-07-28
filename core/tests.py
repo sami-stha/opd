@@ -197,7 +197,8 @@ class PatientFollowupBookingTests(TestCase):
             token_number='M1',
             status=C.COMPLETED,
         )
-        from core.models import Consultation
+        from core.models import Consultation, FollowupRule
+        FollowupRule.objects.create(exempt_within_days=7, is_active=True)
         Consultation.objects.create(
             token=self.token,
             diagnosis='Hypertension review',
@@ -213,6 +214,38 @@ class PatientFollowupBookingTests(TestCase):
         self.assertTrue(followup.is_followup)
         self.assertTrue(followup.fee_exempted)
         self.assertEqual(followup.original_token_id, self.token.id)
+
+    def test_book_followup_via_slot(self):
+        from datetime import timedelta
+        from core.models import ConsultationSlot
+        from core.services.followup import book_followup_via_slot
+
+        tomorrow = self.today + timedelta(days=1)
+        slot2 = ConsultationSlot.objects.create(
+            doctor=self.doctor,
+            date=tomorrow,
+            slot_type='afternoon',
+            start_time='12:00',
+            end_time='14:00',
+            max_tokens=20,
+        )
+        followup, fee_exempt = book_followup_via_slot(self.token, slot2, self.patient)
+        self.assertTrue(fee_exempt)
+        self.assertEqual(followup.slot_id, slot2.id)
+        self.assertTrue(followup.is_followup)
+
+    def test_no_reminder_after_exemption_period(self):
+        from datetime import timedelta
+        from django.db.models import Q
+        from core.services.followup import list_patient_followup_opportunities
+
+        self.slot.date = self.today - timedelta(days=10)
+        self.slot.save(update_fields=['date'])
+        q = Q(patient_id=self.patient.id) | Q(patient_phone=self.patient.phone)
+        self.assertEqual(list_patient_followup_opportunities(q), [])
+
+
+class PatientLabSelfPayTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.today = timezone.localdate()

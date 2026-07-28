@@ -5,14 +5,18 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models import LabOrder, Payment, Prescription, Token
+from core.models import ConsultationSlot, LabOrder, Payment, Prescription, Token
 from core.permissions import IsPatient
 from core.services.followup import (
     FollowupBookingError,
     book_followup,
+    book_followup_via_slot,
+    exemption_end_date,
+    get_followup_booking_context,
     list_patient_followup_opportunities,
     resolve_followup_visit_date,
 )
+from core.utils import consultation_fee_with_charge
 from core.services.lab_payments import LabPaymentError, PENDING_LAB_STATUSES, pay_lab_order, pay_lab_orders_for_token
 from core.utils import format_local_time, doctor_name_short, doctor_specialty, serialize_token
 
@@ -51,6 +55,16 @@ def _patient_pending_lab_orders(user):
 
 def _patient_token_belongs_to_user(user, token_id):
     return Token.objects.filter(_patient_token_filter(user), id=token_id).exists()
+
+
+def _lab_payment_reference(request, default_suffix):
+    """Build gateway reference like esewa-lab-12 (same pattern as appointment booking)."""
+    method = (request.data.get('payment_method') or 'esewa').lower().strip()
+    if method not in ('esewa', 'khalti'):
+        method = 'esewa'
+    custom = (request.data.get('reference_number') or '').strip()
+    reference = custom or f'{method}-{default_suffix}'
+    return reference, method
 
 
 @api_view(['GET'])
@@ -209,7 +223,7 @@ def patient_followups(request):
         'success': True,
         'followups': opportunities,
         'actionable_count': len(actionable),
-        'exempt_within_days': opportunities[0]['exempt_within_days'] if opportunities else 3,
+        'exempt_within_days': opportunities[0]['exempt_within_days'] if opportunities else 7,
     })
 
 
@@ -248,6 +262,82 @@ def create_followup(request, token_id):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsPatient])
+def patient_followup_booking_context(request, token_id):
+    """Slots and fee info for the follow-up booking portal."""
+    try:
+        original = Token.objects.select_related(
+            'slot__doctor', 'consultation', 'patient',
+        ).filter(_patient_token_filter(request.user)).get(id=token_id)
+    except Token.DoesNotExist:
+        return Response({'success': False, 'error': 'Token not found'}, status=404)
+
+    today = timezone.localdate()
+    if today > exemption_end_date(original):
+        return Response({
+            'success': False,
+            'error': 'Follow-up fee exemption period has ended. Please book a regular appointment.',
+            'expired': True,
+        }, status=400)
+
+    consult = getattr(original, 'consultation', None)
+    if not consult or not consult.followup_date:
+        return Response({'success': False, 'error': 'No follow-up scheduled for this visit'}, status=400)
+
+    ctx = get_followup_booking_context(original)
+    fee, service_charge, total = consultation_fee_with_charge()
+    ctx['consultation_fee'] = fee
+    ctx['service_charge'] = service_charge
+    ctx['total_fee'] = total
+    return Response({'success': True, **ctx})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsPatient])
+def patient_book_followup(request):
+    """Book follow-up via slot selection (same workflow as online booking)."""
+    original_token_id = request.data.get('original_token_id')
+    slot_id = request.data.get('slot_id')
+    if not original_token_id or not slot_id:
+        return Response({
+            'success': False,
+            'error': 'original_token_id and slot_id are required',
+        }, status=400)
+
+    try:
+        original = Token.objects.select_related(
+            'slot__doctor', 'consultation', 'patient',
+        ).filter(_patient_token_filter(request.user)).get(id=original_token_id)
+    except Token.DoesNotExist:
+        return Response({'success': False, 'error': 'Token not found'}, status=404)
+
+    try:
+        slot = ConsultationSlot.objects.select_related('doctor__user').get(id=slot_id)
+    except ConsultationSlot.DoesNotExist:
+        return Response({'success': False, 'error': 'Slot not found'}, status=404)
+
+    try:
+        followup, fee_exempt = book_followup_via_slot(
+            original,
+            slot,
+            request.user,
+            request.data.get('payment_method'),
+        )
+    except FollowupBookingError as exc:
+        return Response({'success': False, 'error': exc.message}, status=exc.status_code)
+
+    followup = Token.objects.select_related('slot__doctor').get(id=followup.id)
+
+    return Response({
+        'success': True,
+        'followup_token': followup.token_number,
+        'fee_exempted': fee_exempt,
+        'visit_date': slot.date.isoformat(),
+        'token': serialize_token(followup),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsPatient])
 def patient_lab_payments(request):
     """Pending lab test fees the patient can pay online."""
     orders = _patient_pending_lab_orders(request.user)
@@ -273,11 +363,12 @@ def patient_pay_lab_fee(request, order_id):
         return Response({'success': False, 'error': 'Lab order not found'}, status=404)
 
     try:
+        reference, payment_method = _lab_payment_reference(request, f'lab-{order_id}')
         order, payment, entry = pay_lab_order(
             order_id,
             order.fee,
             request.user,
-            request.data.get('reference_number', f'patient-lab-{order.id}'),
+            reference,
         )
     except LabPaymentError as exc:
         return Response({'success': False, 'error': exc.message}, status=exc.status_code)
@@ -290,6 +381,8 @@ def patient_pay_lab_fee(request, order_id):
         'amount': float(payment.amount),
         'status': order.status,
         'payment_status': 'paid',
+        'payment_method': payment_method,
+        'reference_number': payment.reference_number,
         'paid_at': payment.paid_at.isoformat(),
         'paid_at_display': format_local_time(payment.paid_at, '%d %b %Y, %I:%M %p'),
         'queue_entry_id': entry.id,
@@ -304,10 +397,11 @@ def patient_pay_lab_fees_for_token(request, token_id):
 
     repair_corrupt_lab_orders(token_id)
     try:
+        reference, payment_method = _lab_payment_reference(request, f'lab-token-{token_id}')
         orders, payments, entries, total = pay_lab_orders_for_token(
             token_id,
             request.user,
-            request.data.get('reference_number', f'patient-lab-token-{token_id}'),
+            reference,
         )
     except LabPaymentError as exc:
         return Response({'success': False, 'error': exc.message}, status=exc.status_code)
@@ -320,6 +414,8 @@ def patient_pay_lab_fees_for_token(request, token_id):
         'orders_paid': len(orders),
         'total_amount': float(total),
         'payment_status': 'paid',
+        'payment_method': payment_method,
+        'reference_number': payments[-1].reference_number if payments else reference,
         'paid_at': paid_at.isoformat() if paid_at else None,
         'paid_at_display': format_local_time(paid_at, '%d %b %Y, %I:%M %p') if paid_at else None,
         'payment_ids': [p.id for p in payments],

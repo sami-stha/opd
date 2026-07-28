@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Follow-up - General OPD</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <style>
+        .date-card, .slot-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .date-card:hover, .slot-card:hover { border-color: var(--secondary); transform: translateY(-2px); box-shadow: var(--shadow); }
+        .date-card.selected, .slot-card.selected { border-color: var(--secondary); background: rgba(59,151,151,0.05); }
+        .date-card.disabled, .slot-card.disabled { opacity: 0.5; cursor: not-allowed; background: var(--border); }
+        .date-card.disabled:hover { transform: none; border-color: var(--border); }
+        .booking-sidebar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.5rem; position: sticky; top: 100px; }
+        .payment-method { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; cursor: pointer; transition: all 0.3s; }
+        .payment-method:hover, .payment-method.selected { border-color: var(--secondary); background: rgba(59,151,151,0.05); }
+        .token-display { background: #fff; border: 2px solid #000; border-radius: 0; padding: 1.5rem; text-align: center; color: #000; max-width: 420px; margin: 0 auto; font-family: 'Courier New', Courier, monospace; }
+        .token-number { font-size: 2.5rem; font-weight: bold; letter-spacing: 6px; color: #000; border: 2px solid #000; display: inline-block; padding: 0.5rem 1.25rem; margin: 0.75rem 0; }
+        .token-receipt-row { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.35rem; text-align: left; }
+        .token-receipt-divider { border-top: 1px dashed #000; margin: 0.75rem 0; }
+        .token-receipt-note { font-size: 0.8rem; text-align: left; margin-top: 0.75rem; padding: 0.5rem; border: 1px dashed #000; }
+        .steps { display: flex; justify-content: space-between; margin-bottom: 2rem; }
+        .step { flex: 1; text-align: center; }
+        .step-circle { width: 2.5rem; height: 2.5rem; background: var(--border); border: 2px solid var(--border-dark); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 0.5rem; font-weight: 600; color: var(--text-muted); }
+        .step.active .step-circle { background: var(--secondary); border-color: var(--secondary); color: white; }
+        .step.completed .step-circle { background: var(--success); border-color: var(--success); color: white; }
+        .step-label { font-size: 0.75rem; color: var(--text-muted); }
+        .step.active .step-label { color: var(--secondary); font-weight: 500; }
+        .slot-status { font-size: 0.7rem; padding: 0.125rem 0.5rem; border-radius: 20px; display: inline-block; }
+        .slot-passed { background: #FEE2E2; color: var(--danger); }
+        .slot-available { background: #D1FAE5; color: var(--success); }
+        .slot-full { background: #FEF3C7; color: var(--warning); }
+        .followup-info-card { background: rgba(59,151,151,0.06); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1.5rem; }
+        .exempt-badge { background: #D1FAE5; color: var(--success); padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; display: inline-block; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo"><span class="logo-icon"></span><span class="logo-text">GENERAL OPD</span></div>
+            <div class="nav-buttons">
+                <a href="dashboard.html" class="btn btn-outline">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div style="max-width: 1200px; margin: 100px auto 2rem; padding: 0 2rem;">
+        <div id="loadingState" style="text-align:center; padding:3rem;">Loading follow-up booking...</div>
+        <div id="errorState" style="display:none;" class="alert alert-danger"></div>
+
+        <div id="bookingFlow" style="display:none;">
+            <div class="followup-info-card" id="followupInfoCard"></div>
+
+            <div class="steps">
+                <div class="step active" data-step="1"><div class="step-circle">1</div><div class="step-label">Select Date</div></div>
+                <div class="step" data-step="2"><div class="step-circle">2</div><div class="step-label">Select Slot</div></div>
+                <div class="step" data-step="3"><div class="step-circle">3</div><div class="step-label" id="step3Label">Payment</div></div>
+                <div class="step" data-step="4"><div class="step-circle">4</div><div class="step-label">Confirmation</div></div>
+            </div>
+
+            <div id="step1">
+                <h2 style="margin-bottom:1.5rem;">Select Follow-up Date</h2>
+                <div class="grid grid-2" style="max-width:500px;" id="dateContainer"></div>
+            </div>
+
+            <div id="step2" style="display:none;">
+                <h2 style="margin-bottom:1.5rem;">Available slot for <span id="selectedDateDisplay"></span></h2>
+                <div class="grid grid-2" id="slotsContainer"></div>
+                <div style="margin-top:2rem;"><button class="btn btn-outline" onclick="goToStep(1)">← Back</button></div>
+            </div>
+
+            <div id="step3" style="display:none;">
+                <div class="grid grid-2" style="gap:2rem;">
+                    <div id="paymentStepContent"></div>
+                    <div class="booking-sidebar" id="paymentSummary"></div>
+                </div>
+                <div style="display:flex; gap:1rem; margin-top:2rem;">
+                    <button class="btn btn-outline" onclick="goToStep(2)">← Back</button>
+                    <button class="btn btn-success" id="confirmBookBtn" onclick="confirmBooking()">Confirm →</button>
+                </div>
+            </div>
+
+            <div id="step4" style="display:none;">
+                <div class="token-display" id="tokenDisplay"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/icons.js"></script>
+    <script src="../js/app.js?v=20260712f"></script>
+    <script src="../js/api.js?v=20260712f"></script>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const originalTokenId = parseInt(params.get('original_token_id'), 10);
+
+        let bookingContext = null;
+        let apiSlots = { today: [], tomorrow: [] };
+        let selectedDate = null;
+        let selectedSlot = null;
+        let selectedPayment = null;
+        let serverToday = TimeUtils.localDateISO();
+        const DOCTOR_ROLE_LABEL = 'General Physician';
+
+        function mapSlotItem(s) {
+            return {
+                id: s.slot_id,
+                slot_id: s.slot_id,
+                name: s.doctor_name,
+                slot: (s.slot_type_display || s.slot_type).toUpperCase(),
+                slot_type: s.slot_type,
+                time: s.time_range,
+                booked: s.tokens_booked,
+                total: s.max_tokens,
+                fee: s.fee,
+                date: s.date,
+                is_ended: !!s.is_ended,
+                is_full: !!s.is_full,
+                is_bookable: s.is_bookable !== false && !s.is_ended && !s.is_full,
+            };
+        }
+
+        function isSlotPassed(slotType) {
+            return TimeUtils.isSlotPassed(slotType, serverToday);
+        }
+
+        function isSlotBookable(slot, dayKey) {
+            if (slot.is_bookable === false) return false;
+            if (slot.is_ended || slot.is_full) return false;
+            if (dayKey === 'today' && isSlotPassed(slot.slot)) return false;
+            return true;
+        }
+
+        function dayHasSlots(dayKey) {
+            return (apiSlots[dayKey] || []).length > 0;
+        }
+
+        function dayHasBookableSlots(dayKey) {
+            const slots = apiSlots[dayKey] || [];
+            return slots.some((s) => isSlotBookable(s, dayKey));
+        }
+
+        function isFeeExemptForDay(dayKey) {
+            if (!bookingContext) return false;
+            const slotDate = dayKey === 'today' ? bookingContext.today : bookingContext.tomorrow;
+            if (!slotDate || !bookingContext.exemption_end_date) return false;
+            return slotDate <= bookingContext.exemption_end_date;
+        }
+
+        function isFeeExemptForSlot(slot) {
+            if (!bookingContext || !slot?.date) return false;
+            return slot.date <= bookingContext.exemption_end_date;
+        }
+
+        function getPaymentTotal() {
+            const fee = bookingContext.consultation_fee || selectedSlot?.fee || 0;
+            const sc = bookingContext.service_charge || Math.round(fee * 0.015);
+            return bookingContext.total_fee || (fee + sc);
+        }
+
+        function renderFollowupInfo() {
+            const c = bookingContext;
+            const exemptDays = c.exempt_within_days || 7;
+            document.getElementById('followupInfoCard').innerHTML = `
+                <h3 style="margin-bottom:0.75rem;">Follow-up with ${c.doctor_name}</h3>
+                <p style="margin:0; font-size:0.9rem; color:var(--text-muted);">
+                    Original visit: Token <strong>${c.token_number}</strong>
+                    ${c.followup_date ? ` · Doctor scheduled: <strong>${formatDate(c.followup_date)}</strong>` : ''}
+                </p>
+                ${c.diagnosis ? `<p style="margin:0.5rem 0 0; font-size:0.9rem;"><strong>Diagnosis:</strong> ${escapeHtml(c.diagnosis)}</p>` : ''}
+                ${c.followup_instructions ? `<p style="margin:0.5rem 0 0; font-size:0.9rem;"><strong>Instructions:</strong> ${escapeHtml(c.followup_instructions)}</p>` : ''}
+                <p style="margin:0.75rem 0 0; font-size:0.85rem; color:#92400e;">
+                    Fee exemption ends ${formatDate(c.exemption_end_date)} (${c.days_until_exemption_ends} day(s) left).
+                    Book within ${exemptDays} days of your visit for a fee-exempt follow-up.
+                </p>
+                <span class="exempt-badge">Same doctor · Follow-up visit</span>`;
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso + 'T12:00:00');
+            return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        function escapeHtml(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderDates() {
+            const todayDate = new Date();
+            const tomorrowDate = new Date(todayDate);
+            tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+            const todayDateStr = todayDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+            const tomorrowDateStr = tomorrowDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+            const hasToday = dayHasSlots('today');
+            const hasTomorrow = dayHasSlots('tomorrow');
+            const bookableToday = dayHasBookableSlots('today');
+            const bookableTomorrow = dayHasBookableSlots('tomorrow');
+
+            document.getElementById('dateContainer').innerHTML = `
+                <div class="date-card ${!hasToday ? 'disabled' : ''}" onclick="${hasToday ? "selectDate('today')" : ''}" id="dateToday">
+                    <div style="font-size:1.25rem; font-weight:bold;">Today</div>
+                    <div style="color:var(--text-muted);">${todayDateStr}</div>
+                    ${bookableToday ? '<div class="slot-status slot-available" style="margin-top:0.5rem;">Available</div>' : hasToday ? '<div class="slot-status slot-passed" style="margin-top:0.5rem;">No bookable slots</div>' : '<div class="slot-status slot-passed" style="margin-top:0.5rem;">No slots</div>'}
+                    ${isFeeExemptForDay('today') ? '<div class="exempt-badge" style="margin-top:0.5rem;">Fee exempt</div>' : ''}
+                </div>
+                <div class="date-card ${!hasTomorrow ? 'disabled' : ''}" onclick="${hasTomorrow ? "selectDate('tomorrow')" : ''}" id="dateTomorrow">
+                    <div style="font-size:1.25rem; font-weight:bold;">Tomorrow</div>
+                    <div style="color:var(--text-muted);">${tomorrowDateStr}</div>
+                    ${bookableTomorrow ? '<div class="slot-status slot-available" style="margin-top:0.5rem;">Available</div>' : hasTomorrow ? '<div class="slot-status slot-passed" style="margin-top:0.5rem;">No bookable slots</div>' : '<div class="slot-status slot-passed" style="margin-top:0.5rem;">No slots</div>'}
+                    ${isFeeExemptForDay('tomorrow') ? '<div class="exempt-badge" style="margin-top:0.5rem;">Fee exempt</div>' : ''}
+                </div>`;
+        }
+
+        function selectDate(date) {
+            selectedDate = date;
+            document.querySelectorAll('.date-card').forEach((el) => el.classList.remove('selected'));
+            document.getElementById(`date${date.charAt(0).toUpperCase() + date.slice(1)}`).classList.add('selected');
+            renderSlots();
+            goToStep(2);
+        }
+
+        function renderSlots() {
+            const slotOrder = { MORNING: 0, AFTERNOON: 1, EVENING: 2 };
+            const list = (apiSlots[selectedDate] || []).slice().sort(
+                (a, b) => (slotOrder[a.slot] ?? 9) - (slotOrder[b.slot] ?? 9)
+            );
+            document.getElementById('selectedDateDisplay').textContent = selectedDate === 'today' ? 'Today' : 'Tomorrow';
+            document.getElementById('slotsContainer').innerHTML = list.length ? list.map((s) => {
+                const passed = s.is_ended || (selectedDate === 'today' && isSlotPassed(s.slot));
+                const full = s.is_full || s.booked >= s.total;
+                const bookable = isSlotBookable(s, selectedDate) && !passed && !full;
+                const slotLabel = s.slot === 'MORNING' ? 'Morning' : s.slot === 'AFTERNOON' ? 'Afternoon' : 'Evening';
+                return `<div class="slot-card ${!bookable ? 'disabled' : ''}" onclick="${bookable ? `selectSlot(${s.slot_id})` : ''}" data-slot-id="${s.slot_id}">
+                    <h3 style="margin-bottom:0.35rem;">${slotLabel}</h3>
+                    <div style="margin:0.5rem 0; display:flex; flex-wrap:wrap; gap:0.5rem;">
+                        <span class="exempt-badge">${s.time}</span>
+                        ${passed ? '<span class="slot-status slot-passed">Slot ended</span>' : ''}
+                        ${full && !passed ? '<span class="slot-status slot-full">Fully booked</span>' : ''}
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" style="width:${(s.booked / s.total) * 100}%"></div></div>
+                    <div style="display:flex; justify-content:space-between; margin-top:0.5rem; font-size:0.875rem;">
+                        <span>${s.booked}/${s.total} booked</span>
+                        <span style="color:var(--secondary);">${Math.max(s.total - s.booked, 0)} available</span>
+                    </div>
+                </div>`;
+            }).join('') : '<div class="alert alert-info">No slots available for this date.</div>';
+        }
+
+        function selectSlot(slotId) {
+            selectedSlot = (apiSlots[selectedDate] || []).find((s) => s.slot_id === slotId);
+            if (!selectedSlot || !isSlotBookable(selectedSlot, selectedDate)) {
+                Toast.show('This slot cannot be booked.', 'error');
+                return;
+            }
+            document.querySelectorAll('.slot-card').forEach((el) => el.classList.remove('selected'));
+            document.querySelector(`[data-slot-id="${slotId}"]`).classList.add('selected');
+            preparePaymentStep();
+            goToStep(3);
+        }
+
+        function preparePaymentStep() {
+            const feeExempt = isFeeExemptForSlot(selectedSlot);
+            document.getElementById('step3Label').textContent = feeExempt ? 'Confirm' : 'Payment';
+
+            if (feeExempt) {
+                document.getElementById('paymentStepContent').innerHTML = `
+                    <h2 style="margin-bottom:1rem;">Confirm Free Follow-up</h2>
+                    <div class="alert alert-success">
+                        <span>✓</span>
+                        <div>Your follow-up consultation fee is waived within the ${bookingContext.exempt_within_days || 7}-day exemption window.</div>
+                    </div>
+                    <p style="color:var(--text-muted);">No payment required. Confirm to receive your token.</p>`;
+                document.getElementById('paymentSummary').innerHTML = `
+                    <h3>Booking Summary</h3>
+                    <p><strong>Doctor:</strong> ${bookingContext.doctor_name}</p>
+                    <p><strong>Date:</strong> ${selectedDate === 'today' ? 'Today' : 'Tomorrow'}</p>
+                    <p><strong>Time:</strong> ${selectedSlot.time}</p>
+                    <hr style="border-color:var(--border);">
+                    <p style="font-size:1.1rem;"><strong>Total:</strong> Rs.0 <span class="exempt-badge">Fee exempt</span></p>`;
+                document.getElementById('confirmBookBtn').textContent = 'Confirm Free Follow-up →';
+            } else {
+                const fee = bookingContext.consultation_fee || selectedSlot.fee;
+                const sc = bookingContext.service_charge || Math.round(fee * 0.015);
+                const total = bookingContext.total_fee || (fee + sc);
+                document.getElementById('paymentStepContent').innerHTML = `
+                    <h2 style="margin-bottom:1.5rem;">Select Payment Method</h2>
+                    <div class="payment-method" onclick="selectPayment('esewa')" id="paymentEsewa">
+                        <div style="display:flex; justify-content:space-between;">
+                            <div><strong>eSewa</strong><div style="font-size:0.75rem;">Nepal's Digital Wallet</div></div>
+                            <span style="font-weight:bold; color:var(--secondary);">Rs.${total}</span>
+                        </div>
+                    </div>
+                    <div class="payment-method" onclick="selectPayment('khalti')" id="paymentKhalti">
+                        <div style="display:flex; justify-content:space-between;">
+                            <div><strong>Khalti</strong><div style="font-size:0.75rem;">Digital Wallet</div></div>
+                            <span style="font-weight:bold; color:var(--secondary);">Rs.${total}</span>
+                        </div>
+                    </div>`;
+                document.getElementById('paymentSummary').innerHTML = `
+                    <h3>Payment Summary</h3>
+                    <p><strong>Doctor:</strong> ${bookingContext.doctor_name}</p>
+                    <p><strong>Date:</strong> ${selectedDate === 'today' ? 'Today' : 'Tomorrow'}</p>
+                    <p><strong>Time:</strong> ${selectedSlot.time}</p>
+                    <p><strong>Consultation Fee:</strong> Rs.${fee}</p>
+                    <p><strong>Service Charge:</strong> Rs.${sc}</p>
+                    <hr style="border-color:var(--border);">
+                    <p style="font-size:1.25rem;"><strong>Total:</strong> Rs.${total}</p>`;
+                document.getElementById('confirmBookBtn').textContent = 'Pay Now →';
+            }
+            selectedPayment = null;
+        }
+
+        function goToStep(step) {
+            document.querySelectorAll('[id^="step"]').forEach((el) => {
+                if (el.id.match(/^step\d+$/)) el.style.display = 'none';
+            });
+            document.getElementById(`step${step}`).style.display = 'block';
+            document.querySelectorAll('.step').forEach((el, idx) => {
+                el.classList.remove('active', 'completed');
+                if (idx + 1 < step) el.classList.add('completed');
+                if (idx + 1 === step) el.classList.add('active');
+            });
+        }
+
+        function selectPayment(method) {
+            selectedPayment = method;
+            document.querySelectorAll('.payment-method').forEach((el) => el.classList.remove('selected'));
+            document.getElementById(`payment${method.charAt(0).toUpperCase() + method.slice(1)}`).classList.add('selected');
+        }
+
+        async function confirmBooking() {
+            if (!selectedSlot) {
+                Toast.show('Select a slot first', 'error');
+                return;
+            }
+            const feeExempt = isFeeExemptForSlot(selectedSlot);
+            if (!feeExempt && !selectedPayment) {
+                Toast.show('Select payment method', 'error');
+                return;
+            }
+
+            const payload = {
+                original_token_id: originalTokenId,
+                slot_id: selectedSlot.slot_id,
+            };
+            if (!feeExempt) payload.payment_method = selectedPayment;
+
+            document.getElementById('confirmBookBtn').disabled = true;
+            LoadingOverlay.show();
+            const res = await API.patientBookFollowup(payload);
+            LoadingOverlay.hide();
+            document.getElementById('confirmBookBtn').disabled = false;
+
+            if (!res.success) {
+                Toast.show(res.error || 'Booking failed', 'error');
+                return;
+            }
+
+            const t = res.token;
+            const visitLabel = selectedDate === 'today' ? 'Today' : formatDate(t.date || bookingContext.tomorrow);
+            const paymentLabel = res.fee_exempted ? 'Fee exempt (follow-up)' : (selectedPayment === 'esewa' ? 'eSewa' : 'Khalti');
+            const amountLabel = res.fee_exempted ? 'Rs. 0' : `Rs. ${Math.round(getPaymentTotal())}`;
+
+            document.getElementById('tokenDisplay').innerHTML = `
+                <div id="printableToken">
+                    <div style="font-size:0.75rem; letter-spacing:2px;">GENERAL OPD</div>
+                    <div style="font-size:0.7rem; margin-bottom:0.5rem;">FOLLOW-UP TOKEN</div>
+                    <div class="token-number">${t.token_number}</div>
+                    <div class="token-receipt-divider"></div>
+                    <div class="token-receipt-row"><span>Patient</span><span>${t.patient_name}</span></div>
+                    <div class="token-receipt-row"><span>Doctor</span><span>${bookingContext.doctor_name}</span></div>
+                    <div class="token-receipt-row"><span>Date</span><span>${visitLabel}</span></div>
+                    <div class="token-receipt-row"><span>Slot</span><span>${selectedSlot.time}</span></div>
+                    <div class="token-receipt-row"><span>Est. Time</span><span>${t.estimated_time || '—'}</span></div>
+                    <div class="token-receipt-row"><span>Payment</span><span>${paymentLabel}</span></div>
+                    <div class="token-receipt-row"><span>Amount</span><span>${amountLabel}</span></div>
+                    <div class="token-receipt-note">Arrive at reception 15 minutes before your estimated time for check-in.</div>
+                    <div style="display:flex; gap:1rem; margin-top:1.25rem; justify-content:center; flex-wrap:wrap; font-family:inherit;">
+                        <button class="btn btn-primary" onclick="window.location.href='dashboard.html'">Go to Dashboard</button>
+                        <button class="btn btn-outline" onclick="window.print()">Print Token</button>
+                    </div>
+                </div>`;
+            goToStep(4);
+            Toast.show(res.fee_exempted ? 'Free follow-up booked!' : 'Payment successful! Token booked.', 'success');
+        }
+
+        async function init() {
+            if (!originalTokenId) {
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('errorState').style.display = 'block';
+                document.getElementById('errorState').textContent = 'Missing original visit token. Open this page from your dashboard follow-up reminder.';
+                return;
+            }
+
+            const me = await API.authMe();
+            if (!me.success || !me.user) {
+                window.location.href = 'login.html?redirect=' + encodeURIComponent(window.location.href);
+                return;
+            }
+
+            LoadingOverlay.show();
+            const res = await API.patientFollowupBookingContext(originalTokenId);
+            LoadingOverlay.hide();
+            document.getElementById('loadingState').style.display = 'none';
+
+            if (!res.success) {
+                document.getElementById('errorState').style.display = 'block';
+                document.getElementById('errorState').innerHTML = `
+                    <strong>${escapeHtml(res.error || 'Could not load follow-up booking')}</strong>
+                    ${res.expired ? '<p style="margin:0.5rem 0 0;"><a href="booking.html">Book a regular appointment</a></p>' : ''}
+                    <p style="margin:0.5rem 0 0;"><a href="dashboard.html">Back to dashboard</a></p>`;
+                return;
+            }
+
+            if (res.already_booked) {
+                document.getElementById('errorState').style.display = 'block';
+                document.getElementById('errorState').innerHTML = `
+                    Follow-up already booked for this visit.
+                    <p style="margin:0.5rem 0 0;"><a href="dashboard.html">Back to dashboard</a></p>`;
+                return;
+            }
+
+            bookingContext = res;
+            serverToday = res.today || TimeUtils.localDateISO();
+            apiSlots = {
+                today: (res.grouped?.today || []).map(mapSlotItem),
+                tomorrow: (res.grouped?.tomorrow || []).map(mapSlotItem),
+            };
+
+            document.getElementById('bookingFlow').style.display = 'block';
+            renderFollowupInfo();
+            renderDates();
+        }
+
+        init();
+    </script>
+</body>
+</html>
