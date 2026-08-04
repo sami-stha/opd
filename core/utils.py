@@ -43,6 +43,23 @@ def patient_priority_category(token):
     return 'GENERAL'
 
 
+def patient_gender_for_token(token):
+    """Gender from linked patient account, if recorded."""
+    patient = getattr(token, 'patient', None)
+    if patient is not None:
+        raw = getattr(patient, 'gender', None) or ''
+        if raw:
+            return raw
+    return ''
+
+
+def format_patient_gender(gender):
+    if not gender:
+        return ''
+    labels = {'male': 'Male', 'female': 'Female', 'other': 'Other'}
+    return labels.get(str(gender).lower(), str(gender))
+
+
 def patient_id_for_token(token):
     """Canonical PAT code for a token's linked patient account, if any."""
     patient = getattr(token, 'patient', None)
@@ -183,6 +200,7 @@ def serialize_token(token, include_queue=False, include_workflow=False):
         'token_number': token.token_number,
         'patient_name': token.patient_name,
         'patient_age': token.patient_age,
+        'patient_gender': format_patient_gender(patient_gender_for_token(token)),
         'patient_phone': token.patient_phone,
         'patient_address': token.patient_address or '',
         'status': token.status,

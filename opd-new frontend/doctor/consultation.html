@@ -73,7 +73,7 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260712i"></script>
+    <script src="../js/app.js?v=20260804b"></script>
     <script src="../js/api.js?v=20260712i"></script>
     <script>
       let currentPatient = null;
@@ -159,7 +159,7 @@
               <div style="margin-top:0.5rem;">
                 <strong>Prescriptions</strong>
                 <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
-                  ${rxList.map(p => `<li>${escapeHtml(p.medicine_name)} — ${escapeHtml(p.dosage || '')} ${escapeHtml(p.frequency || '')} ${p.duration_days ? `(${p.duration_days} days)` : ''}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
+                  ${rxList.map(p => `<li>${typeof PrescriptionFormat !== 'undefined' ? escapeHtml(PrescriptionFormat.lineSummary(p)) : escapeHtml(`${p.medicine_name} — ${p.dosage || ''} ${p.frequency || ''}`)}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
                 </ul>
               </div>` : ''}
             ${labList.length ? `
@@ -381,7 +381,9 @@
       }
 
       function showPrescriptionSlip(data) {
-        const meds = (data.medicines || []).map(m => `<tr><td>${m.name}</td><td>${m.dosage}</td><td>${m.frequency || ''}</td><td>${m.duration || ''}</td><td>${m.instructions}</td></tr>`).join('');
+        const medTable = (data.medicines || []).length && typeof PrescriptionFormat !== 'undefined'
+          ? PrescriptionFormat.tableHtml(data.medicines)
+          : '';
         document.getElementById('prescriptionBody').innerHTML = `
           <div class="prescription-slip">
             <div class="header"><h1>GENERAL OPD</h1><div>Digital Prescription</div></div>
@@ -391,7 +393,7 @@
             <div class="info-row"><span>Time</span><span>${data.consultationStart} - ${data.consultationEnd}</span></div>
             <div class="section"><div class="section-title">Symptoms</div><div>${data.symptoms}</div></div>
             <div class="section"><div class="section-title">Diagnosis</div><div>${data.diagnosis}</div></div>
-            ${meds ? `<div class="section"><div class="section-title">Medicines</div><table class="medicine-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${meds}</tbody></table></div>` : ''}
+            ${medTable ? `<div class="section"><div class="section-title">Medicines</div>${medTable}</div>` : ''}
             ${data.labTests?.length ? `<div class="section"><div class="section-title">Lab Tests</div>${data.labTests.map(t => `<div>• ${typeof t === 'string' ? t : t.name}${t.fee ? ` (${formatLabFee(t.fee)})` : ''}</div>`).join('')}</div>` : ''}
             <div class="section"><div class="section-title">Follow-up</div><div>${data.followUp}</div></div>
           </div>`;

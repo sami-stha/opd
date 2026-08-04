@@ -58,3 +58,6 @@ DEFAULT_LAB_FEE = 500
 
 # Auto-throttle pauses check-ins when doctor queue exceeds max_queue_size.
 AUTO_THROTTLE_ENABLED = False
+
+# Demo seeder phones — not counted for real-patient PAT serial (PAT0001, …).
+DEMO_PATIENT_PHONE_PREFIXES = ('9800100', '9800110')

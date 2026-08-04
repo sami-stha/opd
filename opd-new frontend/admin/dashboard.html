@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin Dashboard - General OPD</title>
-    <link rel="stylesheet" href="/css/style.css?v=20260727" />
+    <link rel="stylesheet" href="/css/style.css?v=20260803" />
   </head>
   <body>
     <div class="sidebar-layout">
@@ -241,6 +241,67 @@
 
           <div class="analytics-hero-grid" id="analyticsHeroGrid"></div>
 
+          <div class="panel analytics-monthly-panel">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">Monthly Overview</h3>
+                <p class="panel-subtitle" id="monthlyOverviewLabel">Calendar month performance</p>
+              </div>
+            </div>
+            <div class="analytics-hero-grid" id="monthlyHeroGrid"></div>
+            <div class="analytics-charts-grid" style="margin-top: 1rem;">
+              <div class="analytics-chart-panel full-width">
+                <div class="analytics-chart-header">
+                  <div>
+                    <div class="analytics-chart-title">Month-to-Date OPD Activity</div>
+                    <div class="analytics-chart-subtitle">Completed visits, bookings, and daily revenue (calendar month)</div>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap tall"><canvas id="monthlyActivityChart"></canvas></div>
+              </div>
+              <div class="analytics-chart-panel">
+                <div class="analytics-chart-header">
+                  <div>
+                    <div class="analytics-chart-title">Weekly Totals</div>
+                    <div class="analytics-chart-subtitle">Completed visits by week (this month)</div>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap"><canvas id="monthlyWeeklyChart"></canvas></div>
+              </div>
+              <div class="analytics-chart-panel">
+                <div class="analytics-chart-header">
+                  <div>
+                    <div class="analytics-chart-title">Revenue Mix</div>
+                    <div class="analytics-chart-subtitle">This month by payment category</div>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap"><canvas id="monthlyRevenueMixChart"></canvas></div>
+              </div>
+              <div class="analytics-chart-panel">
+                <div class="analytics-chart-header">
+                  <div>
+                    <div class="analytics-chart-title">Slot Mix (Month)</div>
+                    <div class="analytics-chart-subtitle">Completed visits by morning / afternoon / evening</div>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap"><canvas id="monthlySlotChart"></canvas></div>
+              </div>
+              <div class="analytics-chart-panel full-width">
+                <div class="analytics-chart-header">
+                  <div>
+                    <div class="analytics-chart-title">Doctor Throughput (Month)</div>
+                    <div class="analytics-chart-subtitle">Completed visits per doctor this calendar month</div>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap"><canvas id="monthlyDoctorChart"></canvas></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="analytics-section-divider">
+            <span>Today&apos;s Operations</span>
+          </div>
+
           <div class="analytics-charts-grid">
             <div class="analytics-chart-panel full-width">
               <div class="analytics-chart-header">
@@ -264,7 +325,7 @@
               <div class="analytics-chart-header">
                 <div>
                   <div class="analytics-chart-title">Visit Status Today</div>
-                  <div class="analytics-chart-subtitle">Distribution of patient visit states</div>
+                  <div class="analytics-chart-subtitle">All bookings today by current state (max one consulting per doctor)</div>
                 </div>
               </div>
               <div class="analytics-chart-wrap"><canvas id="statusChart"></canvas></div>
@@ -582,7 +643,10 @@
         if (section === "doctors") renderDoctors();
         if (section === "staff") renderStaff();
         if (section === "analytics" && analyticsData) {
-          requestAnimationFrame(() => renderAnalyticsCharts(analyticsData));
+          requestAnimationFrame(() => {
+            renderMonthlyCharts(analyticsData);
+            renderAnalyticsCharts(analyticsData);
+          });
         }
       }
 
@@ -598,6 +662,166 @@
         if (!canvas || typeof Chart === 'undefined') return;
         destroyChart(id);
         chartInstances[id] = new Chart(canvas, config);
+      }
+
+      function renderMonthlyOverview(data) {
+        const m = data.monthly_overview || {};
+        const s = m.summary || {};
+        const labelEl = document.getElementById('monthlyOverviewLabel');
+        if (labelEl) {
+          labelEl.textContent = m.month_label
+            ? `${m.month_label} (${m.month_start} → ${m.month_end})`
+            : 'Calendar month performance';
+        }
+        const heroes = [
+          { label: 'Month Patients', value: fmt(s.total_patients), sub: `${s.active_days || 0} active OPD days` },
+          { label: 'Completed Visits', value: fmt(s.completed_visits), sub: `${fmt(s.completion_rate, '%')} completion rate` },
+          { label: 'Month Revenue', value: s.total_revenue != null ? `Rs. ${s.total_revenue}` : '—', sub: 'Consultation + lab + pharmacy' },
+          { label: 'No-Shows', value: fmt(s.no_shows), sub: `${fmt(s.no_show_rate, '%')} of bookings` },
+          { label: 'Avg Daily Patients', value: fmt(s.avg_daily_patients), sub: 'Per active day this month' },
+          { label: 'Peak Day', value: s.peak_day_label || '—', sub: `${s.peak_day_completed || 0} completed visits` },
+        ];
+        const el = document.getElementById('monthlyHeroGrid');
+        if (!el) return;
+        el.innerHTML = heroes.map((h) => `
+          <div class="analytics-hero-card">
+            <div class="label">${h.label}</div>
+            <div class="value">${h.value}</div>
+            <div class="sub">${h.sub}</div>
+          </div>
+        `).join('');
+      }
+
+      function renderMonthlyCharts(data) {
+        const m = data.monthly_overview || {};
+        const daily = m.daily_series || [];
+        const weekly = m.weekly_totals || [];
+        const revMix = m.revenue_by_type || [];
+        const slotMix = m.slot_breakdown || [];
+        const doctors = m.doctor_throughput || [];
+
+        makeChart('monthlyActivityChart', {
+          type: 'line',
+          data: {
+            labels: daily.map((d) => d.label),
+            datasets: [
+              {
+                label: 'Completed',
+                data: daily.map((d) => d.completed),
+                borderColor: CHART_COLORS.secondary,
+                backgroundColor: 'rgba(13, 148, 136, 0.08)',
+                fill: true,
+                tension: 0.35,
+                yAxisID: 'y',
+              },
+              {
+                label: 'Bookings',
+                data: daily.map((d) => d.patients),
+                borderColor: CHART_COLORS.primary,
+                tension: 0.35,
+                yAxisID: 'y',
+              },
+              {
+                label: 'Revenue (Rs.)',
+                data: daily.map((d) => d.revenue || 0),
+                borderColor: CHART_COLORS.warning,
+                tension: 0.35,
+                yAxisID: 'y1',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Visits' } },
+              y1: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'Rs.' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('monthlyWeeklyChart', {
+          type: 'bar',
+          data: {
+            labels: weekly.map((w) => w.label),
+            datasets: [
+              { label: 'Completed', data: weekly.map((w) => w.completed), backgroundColor: CHART_COLORS.secondary, borderRadius: 4 },
+              { label: 'No-shows', data: weekly.map((w) => w.no_shows), backgroundColor: CHART_COLORS.danger, borderRadius: 4 },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('monthlyRevenueMixChart', {
+          type: 'doughnut',
+          data: {
+            labels: revMix.map((r) => r.label),
+            datasets: [{
+              data: revMix.map((r) => r.amount),
+              backgroundColor: CHART_COLORS.palette,
+              borderWidth: 2,
+              borderColor: '#fff',
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+          },
+        });
+
+        makeChart('monthlySlotChart', {
+          type: 'bar',
+          data: {
+            labels: slotMix.map((s) => s.label),
+            datasets: [
+              { label: 'Completed', data: slotMix.map((s) => s.completed), backgroundColor: CHART_COLORS.success, borderRadius: 4 },
+              { label: 'No-show', data: slotMix.map((s) => s.no_show), backgroundColor: CHART_COLORS.danger, borderRadius: 4 },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        makeChart('monthlyDoctorChart', {
+          type: 'bar',
+          data: {
+            labels: doctors.map((d) => d.doctor.replace('Dr. ', '')),
+            datasets: [{
+              label: 'Completed visits',
+              data: doctors.map((d) => d.completed),
+              backgroundColor: CHART_COLORS.accent,
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E2E8F0' } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
       }
 
       function renderAnalyticsCharts(data) {
@@ -923,7 +1147,7 @@
           { label: "Pending Lab Tests", value: fmt(data.pending_lab_tests) },
           { label: "Pharmacy Queue", value: fmt(data.pharmacy_queue) },
           { label: "Daily Revenue (Rs.)", value: fmt(data.daily_revenue) },
-          { label: "Monthly Revenue (Rs.)", value: fmt(data.monthly_revenue) },
+          { label: "Monthly Revenue (Rs.)", value: fmt(data.monthly_revenue ?? data.monthly_overview?.summary?.total_revenue) },
           { label: "Total Revenue (Rs.)", value: fmt(data.revenue) },
           { label: "Avg Queue Length", value: fmt(data.avg_queue_length) },
           { label: "Doctor Idle (min)", value: fmt(data.doctor_idle_minutes) },
@@ -931,7 +1155,6 @@
           { label: "Check-in Compliance", value: fmt(data.checkin_compliance, "%") },
           { label: "Avg Consultation", value: fmt(data.avg_consultation_minutes, " min") },
           { label: "Peak Hour", value: data.peak_hour || "—" },
-          { label: "Lab TAT", value: fmt(data.lab_turnaround_minutes, " min") },
         ];
 
         document.getElementById("analyticsGrid").innerHTML = metrics
@@ -962,8 +1185,10 @@
           : '<tr><td colspan="5" class="empty-state">No doctor data available</td></tr>';
 
         renderAnalyticsHero(data);
+        renderMonthlyOverview(data);
         renderDoctorUtilBars(queues);
         renderAnalyticsDoctorTable(queues);
+        renderMonthlyCharts(data);
         renderAnalyticsCharts(data);
 
         renderAlerts(data);

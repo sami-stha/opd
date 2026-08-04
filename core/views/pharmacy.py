@@ -40,7 +40,6 @@ def _serialize_pharmacy_entry(entry):
             'name': p.medicine_name,
             'dosage': p.dosage,
             'frequency': p.frequency,
-            'duration': p.frequency,
             'duration_days': p.duration_days,
             'instructions': p.instructions,
             'dispensed': p.dispensed,

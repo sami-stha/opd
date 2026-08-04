@@ -125,3 +125,19 @@ CORS_ALLOW_ALL_ORIGINS = True
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'opd-new frontend'),
 ]
+
+# Fast isolated DB for automated tests (avoids PostgreSQL test DB conflicts).
+if os.environ.get('DJANGO_RUNNING_TESTS') == '1':
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }
+
+    class _DisableMigrations:
+        def __contains__(self, item):
+            return True
+
+        def __getitem__(self, item):
+            return None
+
+    MIGRATION_MODULES = _DisableMigrations()

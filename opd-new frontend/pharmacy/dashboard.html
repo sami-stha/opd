@@ -398,7 +398,7 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260710f"></script>
+    <script src="../js/app.js?v=20260804b"></script>
     <script src="../js/api.js?v=20260710f"></script>
     <script>
         let pharmacyQueue = [];
@@ -507,8 +507,10 @@
                 status: mapStatus(e.status),
                 medicines: (e.prescriptions || []).map(p => ({
                     name: p.medicine_name || p.name,
+                    medicine_name: p.medicine_name || p.name,
                     dosage: p.dosage,
-                    duration: p.frequency || p.duration,
+                    frequency: p.frequency,
+                    duration_days: p.duration_days,
                     instructions: p.instructions,
                 })),
                 total_bill: e.total_bill,
@@ -598,25 +600,18 @@
             
             currentPrescriptionId = id;
 
-            let medicinesRows = "";
-            if (p.medicines && p.medicines.length > 0) {
-                medicinesRows = p.medicines.map(m => `
-                    <tr>
-                        <td>${m.name}</td>
-                        <td>${m.dosage}</td>
-                        <td>${m.duration}</td>
-                        <td>${m.instructions}</td>
-                    </tr>
-                `).join("");
-            }
-
             const statusMap = {
-                pending: { label: "Pending", class: "status-pending" },
-                processing: { label: "Processing", class: "status-processing" },
-                ready: { label: "Ready for Pickup", class: "status-ready" },
-                dispensed: { label: "Dispensed", class: "status-dispensed" }
+                pending: { label: 'Pending', class: 'status-pending' },
+                processing: { label: 'Processing', class: 'status-processing' },
+                ready: { label: 'Ready for Pickup', class: 'status-ready' },
+                dispensed: { label: 'Dispensed', class: 'status-dispensed' },
             };
             const statusInfo = statusMap[p.status] || statusMap.pending;
+
+            let medicinesRows = '';
+            if (p.medicines && p.medicines.length > 0 && typeof PrescriptionFormat !== 'undefined') {
+                medicinesRows = PrescriptionFormat.tableBodyHtml(p.medicines);
+            }
 
             const modalBody = document.getElementById('prescriptionModalBody');
             modalBody.innerHTML = `
@@ -643,16 +638,9 @@
                     <div class="section">
                         <div class="section-title">Medicines</div>
                         <table class="medicine-table">
-                            <thead>
-                                <tr>
-                                    <th>Medicine</th>
-                                    <th>Dosage</th>
-                                    <th>Duration</th>
-                                    <th>Instructions</th>
-                                </tr>
-                            </thead>
+                            <thead>${typeof PrescriptionFormat !== 'undefined' ? PrescriptionFormat.tableHeadHtml() : '<tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr>'}</thead>
                             <tbody>
-                                ${medicinesRows || '<tr><td colspan="4" style="text-align:center; color:#999;">No medicines prescribed</td></tr>'}
+                                ${medicinesRows || '<tr><td colspan="5" style="text-align:center; color:#999;">No medicines prescribed</td></tr>'}
                             </tbody>
                         </table>
                     </div>

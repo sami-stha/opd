@@ -200,7 +200,7 @@
                 type="text"
                 class="form-input"
                 id="searchInput"
-                placeholder="Enter Token Number"
+                placeholder="Token, phone, or Patient ID (e.g. PAT0001)"
                 style="flex: 1"
               />
               <button class="btn btn-primary" onclick="searchPatient()">
@@ -208,6 +208,28 @@
               </button>
             </div>
             <div id="searchResult" class="search-result"></div>
+          </div>
+          <div class="card" style="margin-top: 1rem">
+            <h3>Registered — No Appointment Today</h3>
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 0.75rem;">
+              Walk-in registrations appear here until a token is booked for today.
+            </p>
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Patient ID</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Age</th>
+                    <th>Registered</th>
+                  </tr>
+                </thead>
+                <tbody id="unbookedPatientsList">
+                  <tr><td colspan="5" class="empty-state">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="card" style="margin-top: 1rem">
             <h3>Today's Appointments by Slot</h3>
@@ -474,7 +496,7 @@
 
     <script src="../js/icons.js"></script>
     <script src="../js/app.js?v=20260712n"></script>
-    <script src="../js/api.js?v=20260712m"></script>
+    <script src="../js/api.js?v=20260803a"></script>
     <script>
       // Slot display labels from shared TimeUtils
       const SLOT_CONFIG = TimeUtils.SLOT_CONFIG;
@@ -501,6 +523,7 @@
       let allAppointments = [];
       let queues = { MORNING: [], AFTERNOON: [], EVENING: [] };
       let pendingLabPayments = [];
+      let unbookedPatients = [];
       let currentSearchResult = null;
       let lastRegisteredPatientId = null;
       let registrationSuccessTimer = null;
@@ -558,10 +581,11 @@
 
       // Load data from Django API
       async function refreshReceptionData() {
-        const [aptRes, queueRes, labRes] = await Promise.all([
+        const [aptRes, queueRes, labRes, unbookedRes] = await Promise.all([
           API.receptionAppointments({ day: 'today' }),
           API.waitingQueue(),
           API.receptionLabPayments(),
+          API.receptionUnbookedPatients(),
         ]);
         if (aptRes.success) {
           allAppointments = aptRes.appointments.map(a => ({
@@ -624,10 +648,32 @@
             amount: p.amount || 0,
           }));
         }
+        if (unbookedRes.success) {
+          unbookedPatients = unbookedRes.patients || [];
+        }
         renderAppointments();
+        renderUnbookedPatients();
         renderAllQueues();
         renderStats();
         renderLabPayments();
+      }
+
+      function renderUnbookedPatients() {
+        const tbody = document.getElementById('unbookedPatientsList');
+        if (!tbody) return;
+        if (!unbookedPatients.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No registered patients without a today appointment.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = unbookedPatients.map((p) => `
+          <tr>
+            <td><strong>${p.patient_id || '—'}</strong></td>
+            <td>${p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()}</td>
+            <td>${p.phone || '—'}</td>
+            <td>${p.age ?? '—'}</td>
+            <td>${p.registered_at || '—'}</td>
+          </tr>
+        `).join('');
       }
 
       function loadData() {
@@ -648,16 +694,34 @@
         const token = document.getElementById("searchInput").value.trim();
         if (!token) { Toast.show("Please enter a token number or phone", "error"); return; }
         LoadingOverlay.show();
-        const res = await API.searchPatient(token);
+        const res = await API.searchPatient(token, 'reception');
         LoadingOverlay.hide();
         const resultEl = document.getElementById("searchResult");
         if (!res.success || !res.patients.length) {
-          resultEl.innerHTML = `<div class="alert alert-danger"><span>✗</span><div>No patient found.</div></div>`;
+          resultEl.innerHTML = `<div class="alert alert-danger"><span>✗</span><div>No patient or token found. Register under <strong>Register Patient</strong> or book a token online first.</div></div>`;
           resultEl.style.display = "block";
           return;
         }
         const appointment = res.patients[0];
         currentSearchResult = appointment;
+        if (appointment.is_registered_only || appointment.status === 'registered') {
+          resultEl.innerHTML = `
+            <div class="card" style="margin-bottom:1rem; padding:1rem;">
+              <h4 style="margin-bottom:0.75rem;">Registered Patient (no token today)</h4>
+              <div class="grid grid-2" style="gap:0.5rem; font-size:0.9rem;">
+                <div><strong>Name:</strong> ${appointment.patient_name}</div>
+                <div><strong>Phone:</strong> ${appointment.patient_phone || '—'}</div>
+                <div><strong>Patient ID:</strong> ${appointment.patient_id || '—'}</div>
+                <div><strong>Age:</strong> ${appointment.patient_age ?? '—'}</div>
+              </div>
+            </div>
+            <div class="alert alert-info"><span>ℹ</span><div>
+              This patient is registered but has <strong>no appointment token for today</strong>.
+              Book a token (patient portal or walk-in booking) before check-in.
+            </div></div>`;
+          resultEl.style.display = "block";
+          return;
+        }
         if (['checked_in', 'consulting'].includes(appointment.status)) {
           resultEl.innerHTML = `<div class="alert alert-warning"><span data-icon="warning" data-icon-size="18"></span><div>Already checked in.</div></div>`;
           resultEl.style.display = "block";
@@ -1020,6 +1084,7 @@
           full_name: `${firstName} ${lastName}`,
           phone,
           age: parseInt(age, 10),
+          gender,
           address,
           is_disabled: document.getElementById('priorityDisabled')?.checked || false,
         });
@@ -1032,6 +1097,7 @@
 
         showRegistrationSuccess(res.patient.patient_id, res.patient.name, res.created);
         Toast.show(`Patient registered — ID: ${res.patient.patient_id}`, 'success');
+        refreshReceptionData();
 
         document.getElementById("regFirstName").value = "";
         document.getElementById("regLastName").value = "";

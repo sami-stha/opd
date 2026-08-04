@@ -10,7 +10,11 @@ from core.models import (
     Prescription, Token,
 )
 from core.permissions import IsDoctor
-from core.services.analytics import get_next_eligible_token
+from core.services.queue_order import (
+    get_next_eligible_token,
+    get_ordered_queue_entries,
+    queue_position_for_entry,
+)
 from core.services.workflow import complete_consultation as workflow_complete_consultation, _normalize_lab_test_names
 from accounts.models import User
 from core.utils import (
@@ -35,20 +39,19 @@ def _active_consultation_for_doctor(doctor_id, date=None):
 
 
 def _queue_for_doctor(doctor_id, slot_type=None, statuses=('checked_in',)):
-    from core.services.analytics import get_ordered_queue_tokens
-
-    tokens = get_ordered_queue_tokens(doctor_id)
+    entries = get_ordered_queue_entries(doctor_id)
     if slot_type:
-        tokens = [t for t in tokens if t.slot.slot_type == slot_type]
+        entries = [e for e in entries if e.token.slot.slot_type == slot_type]
 
     queue_list = []
-    for token in tokens:
+    for entry in entries:
+        token = entry.token
         if token.status not in statuses:
             continue
-        entry = getattr(token, 'queue_entry', None)
+        position = queue_position_for_entry(entry) or (len(queue_list) + 1)
         queue_list.append({
-            'position': len(queue_list) + 1,
-            'queue_position': entry.queue_position if entry else len(queue_list) + 1,
+            'position': position,
+            'queue_position': position,
             'token_id': token.id,
             'token_number': token.token_number,
             'patient_id': patient_id_for_token(token),

@@ -8,14 +8,27 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import User
+from accounts.models import PatientSerial, User
 from core import constants as C
 from core.models import DoctorProfile, LabOrder, Token
 from core.permissions import IsReceptionist, IsReceptionistOrAdmin
 from core.services.lab_orders import group_pending_lab_payments, normalize_pending_lab_order_names, repair_corrupt_lab_orders
 from core.services.lab_payments import LabPaymentError, pay_lab_order, pay_lab_orders_for_token
 from core.services.sms import sms_patient_registration
-from core.utils import is_elderly_by_age, patient_id_for_token, resolve_disabled_flag, serialize_token
+from core.utils import is_elderly_by_age, patient_id_for_token, resolve_disabled_flag, serialize_token, format_patient_gender
+
+
+def _normalize_gender(value):
+    if not value:
+        return ''
+    raw = str(value).strip().lower()
+    if raw in ('male', 'm'):
+        return 'male'
+    if raw in ('female', 'f'):
+        return 'female'
+    if raw in ('other', 'o'):
+        return 'other'
+    return ''
 
 
 def _order_tokens_by_slot(queryset):
@@ -60,22 +73,31 @@ def search_patient(request):
                 output_field=IntegerField(),
             ),
         ).order_by('exact_token', 'estimated_time')[:20]
-    else:
-        tokens = tokens.annotate(
-            day_rank=Case(
-                When(slot__date=today, then=0),
-                When(slot__date=today + timedelta(days=1), then=1),
-                default=2,
-                output_field=IntegerField(),
-            ),
-            exact_token=Case(
-                When(token_number__iexact=search_term, then=0),
-                default=1,
-                output_field=IntegerField(),
-            ),
-        ).order_by('day_rank', 'exact_token', 'estimated_time')[:20]
+        results = [serialize_token(t) for t in tokens]
+        return Response({'success': True, 'count': len(results), 'patients': results})
+
+    tokens = tokens.annotate(
+        day_rank=Case(
+            When(slot__date=today, then=0),
+            When(slot__date=today + timedelta(days=1), then=1),
+            default=2,
+            output_field=IntegerField(),
+        ),
+        exact_token=Case(
+            When(token_number__iexact=search_term, then=0),
+            default=1,
+            output_field=IntegerField(),
+        ),
+    ).order_by('day_rank', 'exact_token', 'estimated_time')[:20]
 
     results = [serialize_token(t) for t in tokens]
+    linked_user_ids = {t.patient_id for t in tokens if t.patient_id}
+    patient_qs = _filter_patients_by_search(User.objects.filter(role='patient'), search_term)
+    for user in patient_qs[:10]:
+        if user.id in linked_user_ids:
+            continue
+        results.append(_serialize_registered_patient_search(user))
+
     return Response({'success': True, 'count': len(results), 'patients': results})
 
 
@@ -118,9 +140,12 @@ def register_walkin_patient(request):
     address = request.data.get('address', '')
     token_id = request.data.get('token_id')
     is_disabled = request.data.get('is_disabled')
+    gender = _normalize_gender(request.data.get('gender'))
 
     if not all([full_name, phone, age]):
         return Response({'success': False, 'error': 'Name, phone, and age required'}, status=400)
+
+    PatientSerial.sync_from_database()
 
     user, created = User.objects.get_or_create(
         phone=phone,
@@ -132,6 +157,7 @@ def register_walkin_patient(request):
             'age': int(age),
             'address': address,
             'is_disabled': bool(is_disabled) if is_disabled is not None else False,
+            'gender': gender,
         },
     )
     sms_result = None
@@ -142,12 +168,16 @@ def register_walkin_patient(request):
         user.address = address
         if is_disabled is not None:
             user.is_disabled = bool(is_disabled)
+        if gender:
+            user.gender = gender
         if not user.patient_code:
             user.assign_patient_code()
         user.save()
     else:
         user.set_unusable_password()
-        user.save(update_fields=['password'])
+        if not user.patient_code:
+            user.assign_patient_code()
+        user.save(update_fields=['password', 'patient_code'])
         sms_result = sms_patient_registration(user.patient_id, phone)
 
     if token_id:
@@ -356,6 +386,32 @@ def throttle_status(request):
     return Response({'success': True, 'doctors': data, 'enabled': C.AUTO_THROTTLE_ENABLED})
 
 
+def _registered_patients_queryset():
+    """All patient accounts in the database (includes demo seed patients)."""
+    return User.objects.filter(role='patient')
+
+
+def _order_patients_by_serial(patients):
+    patients = list(patients)
+
+    def sort_key(user):
+        code = (user.patient_code or '').strip()
+        if code:
+            return (0, PatientSerial.code_sort_key(code), user.id)
+        return (1, user.date_joined or timezone.now(), user.id)
+
+    patients.sort(key=sort_key)
+    return patients
+
+
+def _serialize_patients_list(queryset, limit=None):
+    patients = _order_patients_by_serial(queryset)
+    total = len(patients)
+    if limit:
+        patients = patients[:limit]
+    return [_serialize_reception_patient(p, include_stats=True) for p in patients], total
+
+
 def _serialize_reception_patient(user, *, include_stats=False):
     data = {
         'id': user.id,
@@ -368,6 +424,7 @@ def _serialize_reception_patient(user, *, include_stats=False):
         'address': user.address or '',
         'email': user.email or '',
         'is_disabled': bool(getattr(user, 'is_disabled', False)),
+        'gender': format_patient_gender(getattr(user, 'gender', '')),
         'registered_at': user.date_joined.strftime('%Y-%m-%d %H:%M') if user.date_joined else None,
     }
     if include_stats:
@@ -408,22 +465,59 @@ def _filter_patients_by_search(queryset, search):
     return queryset.filter(filters).distinct()
 
 
+def _serialize_registered_patient_search(user):
+    return {
+        'type': 'registered_patient',
+        'token_id': None,
+        'token_number': None,
+        'patient_id': user.patient_id,
+        'patient_name': user.get_full_name() or user.first_name,
+        'patient_phone': user.phone,
+        'patient_age': user.age,
+        'patient_address': user.address or '',
+        'status': 'registered',
+        'display_status': 'Registered (no appointment)',
+        'is_registered_only': True,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsReceptionistOrAdmin])
+def reception_unbooked_patients(request):
+    """Registered patients (with Patient ID) who have no token booked for today."""
+    today = timezone.localdate()
+    patients = _registered_patients_queryset().annotate(
+        today_tokens=Count('tokens', filter=Q(tokens__slot__date=today)),
+        visit_count=Count('tokens'),
+        _full_name=Concat('first_name', Value(' '), 'last_name'),
+    ).filter(today_tokens=0)
+    serialized, total = _serialize_patients_list(patients, limit=100)
+    return Response({
+        'success': True,
+        'count': len(serialized),
+        'total_count': total,
+        'patients': serialized,
+    })
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsReceptionistOrAdmin])
 def reception_patients(request):
+    """All registered patients with serial Patient IDs (same registry as dashboard)."""
     search = request.query_params.get('q', '').strip()
-    patients = User.objects.filter(role='patient').annotate(
+    patients = _registered_patients_queryset().annotate(
         visit_count=Count('tokens'),
         _full_name=Concat('first_name', Value(' '), 'last_name'),
-    ).order_by('-date_joined')
+    )
 
     if search:
         patients = _filter_patients_by_search(patients, search)
 
-    serialized = [_serialize_reception_patient(p, include_stats=True) for p in patients[:200]]
+    serialized, total = _serialize_patients_list(patients)
     return Response({
         'success': True,
         'count': len(serialized),
+        'total_count': total,
         'query': search,
         'patients': serialized,
     })
@@ -473,6 +567,8 @@ def reception_patient_detail(request, user_id):
         user.email = (request.data.get('email') or '').strip()
     if 'is_disabled' in request.data:
         user.is_disabled = bool(request.data.get('is_disabled'))
+    if 'gender' in request.data:
+        user.gender = _normalize_gender(request.data.get('gender'))
     user.save()
 
     full_name = user.get_full_name() or first_name

@@ -8,7 +8,7 @@ from core.permissions import IsLabTech, IsReceptionistOrAdmin
 from core.services.sms import sms_lab_report_ready
 from core.services.lab_orders import normalize_pending_lab_order_names, repair_corrupt_lab_orders
 from core.services.workflow import after_lab_report_uploaded
-from core.utils import serialize_token, patient_id_for_token
+from core.utils import serialize_token, patient_id_for_token, patient_gender_for_token, format_patient_gender
 
 
 def _serialize_lab_order(order):
@@ -22,6 +22,8 @@ def _serialize_lab_order(order):
         'token_number': token.token_number,
         'patient_id': patient_id_for_token(token),
         'patient_name': token.patient_name,
+        'patient_age': token.patient_age,
+        'patient_gender': format_patient_gender(patient_gender_for_token(token)),
         'test_name': order.test_name,
         'fee': float(order.fee),
         'status': order.status,

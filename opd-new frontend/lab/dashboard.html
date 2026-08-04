@@ -193,6 +193,7 @@
           <button onclick="closeResultModal()">&times;</button>
         </div>
         <div class="modal-body">
+          <div id="resultPatientSummary" class="lab-patient-summary" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--bg-muted, #f4f6f8); border-radius: 8px; font-size: 0.9rem;"></div>
           <div class="form-group">
             <label class="form-label">Test Results</label>
             <textarea
@@ -201,15 +202,6 @@
               rows="4"
               placeholder="Enter detailed test results..."
             ></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Normal Range</label>
-            <input
-              type="text"
-              class="form-input"
-              id="normalRange"
-              placeholder="e.g., 100-200 mg/dL"
-            />
           </div>
           <div class="form-group">
             <label class="form-label">Upload Report (PDF/Image)</label>
@@ -281,6 +273,8 @@
           order_id: t.order_id,
           patient: t.patient_name,
           patient_id: t.patient_id,
+          patient_age: t.patient_age,
+          patient_gender: t.patient_gender || '',
           token: t.token_number,
           tests: [t.test_name],
           status,
@@ -352,7 +346,8 @@
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
                             <h4>${PatientDisplay.label(t.patient, t.patient_id)}</h4>
-                            <p><strong>Token:</strong> ${t.token} | <strong>Ordered:</strong> ${t.orderedAt ? new Date(t.orderedAt).toLocaleString() : '—'}</p>
+                            <p><strong>Token:</strong> ${t.token} | <strong>Age:</strong> ${t.patient_age ?? '—'} | <strong>Gender:</strong> ${t.patient_gender || '—'}</p>
+                            <p><strong>Ordered:</strong> ${t.orderedAt ? new Date(t.orderedAt).toLocaleString() : '—'}</p>
                             <p><strong>Tests:</strong> ${t.tests.join(", ")}</p>
                         </div>
                         <button class="btn btn-primary" onclick="startTest(${t.id})">Start Test →</button>
@@ -376,7 +371,8 @@
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
                             <h4>${PatientDisplay.label(t.patient, t.patient_id)} <span class="status-badge status-processing">In Progress</span></h4>
-                            <p><strong>Token:</strong> ${t.token} | <strong>Started:</strong> ${formatLabDate(t.startedAt)}</p>
+                            <p><strong>Token:</strong> ${t.token} | <strong>Age:</strong> ${t.patient_age ?? '—'} | <strong>Gender:</strong> ${t.patient_gender || '—'}</p>
+                            <p><strong>Started:</strong> ${formatLabDate(t.startedAt)}</p>
                             <p><strong>Tests:</strong> ${t.tests.join(", ")}</p>
                         </div>
                         <button class="btn btn-success" onclick="openResultModal(${t.id})">Add Results</button>
@@ -483,8 +479,32 @@
         Toast.show(`Started processing tests for ${test.patient}`, "success");
       }
 
+      function resetResultForm() {
+        const resultEl = document.getElementById('resultValue');
+        const notesEl = document.getElementById('labNotes');
+        const fileEl = document.getElementById('reportFile');
+        if (resultEl) resultEl.value = '';
+        if (notesEl) notesEl.value = '';
+        if (fileEl) fileEl.value = '';
+        const summary = document.getElementById('resultPatientSummary');
+        if (summary) summary.innerHTML = '';
+      }
+
       function openResultModal(id) {
+        const test = processingTests.find((t) => t.id === id);
+        if (!test) return;
+        resetResultForm();
         currentTestId = id;
+        const summary = document.getElementById('resultPatientSummary');
+        if (summary) {
+          summary.innerHTML = `
+            <strong>${PatientDisplay.label(test.patient, test.patient_id)}</strong><br>
+            Token: ${test.token || '—'} |
+            Age: ${test.patient_age ?? '—'} |
+            Gender: ${test.patient_gender || '—'}<br>
+            Tests: ${test.tests.join(', ')}
+          `;
+        }
         document.getElementById("resultModal").classList.add("active");
       }
 
@@ -554,6 +574,8 @@
 
       function closeResultModal() {
         document.getElementById("resultModal").classList.remove("active");
+        currentTestId = null;
+        resetResultForm();
       }
 
       API.requireStaff(['lab_tech']).then(user => {

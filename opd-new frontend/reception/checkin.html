@@ -317,7 +317,7 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260710k"></script>
+    <script src="../js/app.js?v=20260804c"></script>
     <script src="../js/api.js?v=20260712c"></script>
     <script>
       // Slot times from shared TimeUtils (prefix used for mock token labels)
@@ -328,12 +328,42 @@
       };
       const SLOT_DISPLAY_ORDER = { MORNING: 0, AFTERNOON: 1, EVENING: 2 };
 
+      function getCheckinListSortTier(apt) {
+        const status = normalizeAptStatus(apt.status);
+        if (status === 'expired' || status === 'cancelled' || isExpiredAppointment(apt)) return 4;
+        if (status === 'completed') return 3;
+        if (['consulting', 'pending_lab', 'pending_pharmacy'].includes(status)) return 2;
+        if (isInDoctorQueue(apt) || status === 'checked_in') return 1;
+        if (isPendingStatus(apt)) return 0;
+        return 2;
+      }
+
+      /** Pending & active first; completed / no-show at bottom (serial by token within slot). */
+      function getCheckinSortGroup(apt) {
+        const tier = getCheckinListSortTier(apt);
+        if (tier === 0) return 0;
+        if (tier === 1) return 1;
+        if (tier === 2) return 2;
+        return 3;
+      }
+
+      function tokenSerialOrder(token) {
+        const raw = String(token || '').trim();
+        const prefix = raw.match(/^([A-Za-z]+)/)?.[1]?.toUpperCase() || '';
+        const num = parseInt(raw.replace(/\D/g, ''), 10) || 0;
+        const prefixOrder = { M: 0, A: 1, E: 2 }[prefix] ?? 9;
+        return prefixOrder * 10000 + num;
+      }
+
       function sortAppointmentsBySlot(list) {
         return [...list].sort((a, b) => {
+          const groupA = getCheckinSortGroup(a);
+          const groupB = getCheckinSortGroup(b);
+          if (groupA !== groupB) return groupA - groupB;
           const slotA = SLOT_DISPLAY_ORDER[a.slot] ?? 9;
           const slotB = SLOT_DISPLAY_ORDER[b.slot] ?? 9;
           if (slotA !== slotB) return slotA - slotB;
-          return String(a.scheduledTime || '').localeCompare(String(b.scheduledTime || ''));
+          return tokenSerialOrder(a.token) - tokenSerialOrder(b.token);
         });
       }
 

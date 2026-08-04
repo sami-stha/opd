@@ -9,7 +9,7 @@ from .booking import available_slots, book_token, cancel_token, cancel_token_pub
 from .reception import (
     search_patient, check_in_patient, register_walkin_patient,
     reception_appointments, reception_lab_payments, pay_lab_fee, pay_lab_fees_for_token, throttle_status,
-    reception_tokens_booked, reception_patients, reception_patient_detail,
+    reception_tokens_booked, reception_patients, reception_patient_detail, reception_unbooked_patients,
 )
 from .doctor import (
     doctor_schedule, doctor_queue, next_patient,

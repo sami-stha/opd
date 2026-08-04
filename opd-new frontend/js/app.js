@@ -490,6 +490,49 @@ const PatientDisplay = {
     },
 };
 
+/** Normalize medicine lines for every digital prescription view (doctor / pharmacy / patient). */
+const PrescriptionFormat = {
+    normalizeLine(medicine) {
+        const m = medicine || {};
+        const name = m.medicine_name || m.name || '—';
+        const dosage = m.dosage || '—';
+        const frequency = m.frequency || '—';
+        let duration = '—';
+        if (m.duration_days != null && m.duration_days !== '') {
+            const days = Number(m.duration_days);
+            duration = Number.isFinite(days) ? `${days} day${days === 1 ? '' : 's'}` : String(m.duration_days);
+        } else if (m.duration) {
+            duration = m.duration;
+        }
+        const instructions = m.instructions || '—';
+        return { name, dosage, frequency, duration, instructions };
+    },
+
+    lineSummary(medicine) {
+        const m = this.normalizeLine(medicine);
+        return `${m.name} — ${m.dosage}, ${m.frequency}, ${m.duration}, ${m.instructions}`;
+    },
+
+    tableHeadHtml() {
+        return '<tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr>';
+    },
+
+    tableBodyHtml(medicines, escapeHtml = (s) => String(s ?? '')) {
+        const rows = (medicines || []).map((raw) => {
+            const m = this.normalizeLine(raw);
+            return `<tr><td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.dosage)}</td><td>${escapeHtml(m.frequency)}</td><td>${escapeHtml(m.duration)}</td><td>${escapeHtml(m.instructions)}</td></tr>`;
+        });
+        if (!rows.length) {
+            return '<tr><td colspan="5" style="text-align:center;color:#999;">No medicines prescribed</td></tr>';
+        }
+        return rows.join('');
+    },
+
+    tableHtml(medicines, escapeHtml) {
+        return `<table class="medicine-table"><thead>${this.tableHeadHtml()}</thead><tbody>${this.tableBodyHtml(medicines, escapeHtml)}</tbody></table>`;
+    },
+};
+
 // Export
 window.Toast = Toast;
 window.LoadingOverlay = LoadingOverlay;
@@ -497,6 +540,7 @@ window.StorageManager = StorageManager;
 window.TimeUtils = TimeUtils;
 window.PatientPriority = PatientPriority;
 window.PatientDisplay = PatientDisplay;
+window.PrescriptionFormat = PrescriptionFormat;
 
 function logoutPortal(redirectUrl = '../index.html') {
     if (typeof API !== 'undefined' && API.logout) {

@@ -183,6 +183,7 @@ const API = {
         if (!q) return this.get('/reception/patients/');
         return this.get(`/reception/patients/?q=${encodeURIComponent(q)}`);
     },
+    receptionUnbookedPatients() { return this.get('/reception/patients/unbooked-today/'); },
     receptionPatientDetail(userId) { return this.get(`/reception/patients/${userId}/`); },
     receptionUpdatePatient(userId, d) { return this.put(`/reception/patients/${userId}/`, d); },
     receptionLabPayments() { return this.get('/reception/lab-payments/'); },

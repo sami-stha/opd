@@ -13,7 +13,7 @@ from core.models import (
     ThrottleLog, Token,
 )
 from core.permissions import STAFF_ROLES, IsAdmin
-from core.services.analytics import compute_kpis, get_recommendations
+from core.services.analytics import compute_kpis, ensure_slot_recommendations, get_recommendations
 from core.utils import ensure_today_tomorrow_slots, serialize_slot
 from core.services.slot_config import (
     ensure_slot_type_configs,
@@ -453,6 +453,7 @@ def admin_throttle_logs(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def analytics(request):
+    ensure_slot_recommendations()
     kpis = compute_kpis()
     recommendations = [
         {

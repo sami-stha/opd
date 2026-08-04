@@ -778,7 +778,7 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260712d"></script>
+    <script src="../js/app.js?v=20260804b"></script>
     <script src="../js/api.js?v=20260712d"></script>
     <script>
       // Prefer real visit status; only use slot-time labels for booked appointments.
@@ -888,13 +888,17 @@
       }
 
       function formatMedicineFields(medicine) {
+        if (typeof PrescriptionFormat !== 'undefined') {
+          return PrescriptionFormat.normalizeLine(medicine);
+        }
         const m = medicine || {};
-        const name = m.medicine_name || m.name || '—';
-        const dosage = m.dosage || '—';
-        let duration = m.duration || m.frequency || '—';
-        if (m.duration_days) duration = `${m.duration_days} days`;
-        const instructions = m.instructions || '—';
-        return { name, dosage, duration, instructions };
+        return {
+          name: m.medicine_name || m.name || '—',
+          dosage: m.dosage || '—',
+          frequency: m.frequency || '—',
+          duration: m.duration_days ? `${m.duration_days} days` : (m.duration || '—'),
+          instructions: m.instructions || '—',
+        };
       }
 
       function formatPrescriptionDate(isoDate) {
@@ -922,7 +926,9 @@
       function buildPrescriptionSlipHtml(p, slipId = 'printablePrescription') {
         const meds = (p.medicines || []).map(formatMedicineFields);
         const medRows = meds.length
-          ? `<table class="medicine-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${meds.map((m) => `<tr><td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.dosage)}</td><td>${escapeHtml(m.duration)}</td><td>${escapeHtml(m.instructions)}</td></tr>`).join('')}</tbody></table>`
+          ? (typeof PrescriptionFormat !== 'undefined'
+            ? PrescriptionFormat.tableHtml(p.medicines || [], escapeHtml)
+            : `<table class="medicine-table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead><tbody>${meds.map((m) => `<tr><td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.dosage)}</td><td>${escapeHtml(m.frequency)}</td><td>${escapeHtml(m.duration)}</td><td>${escapeHtml(m.instructions)}</td></tr>`).join('')}</tbody></table>`)
           : '<div>No medicines prescribed</div>';
         return `
           <div class="prescription-slip" id="${slipId}">

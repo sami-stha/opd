@@ -34,6 +34,7 @@ urlpatterns = [
     path('reception/appointments/', views.reception_appointments, name='reception-appointments'),
     path('reception/tokens-booked/', views.reception_tokens_booked, name='reception-tokens-booked'),
     path('reception/patients/', views.reception_patients, name='reception-patients'),
+    path('reception/patients/unbooked-today/', views.reception_unbooked_patients, name='reception-unbooked-patients'),
     path('reception/patients/<int:user_id>/', views.reception_patient_detail, name='reception-patient-detail'),
     path('reception/lab-payments/', views.reception_lab_payments, name='reception-lab-payments'),
     path('reception/lab-pay/<int:order_id>/', views.pay_lab_fee, name='reception-lab-pay'),

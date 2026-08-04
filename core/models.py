@@ -432,9 +432,8 @@ class Token(models.Model):
 class QueueEntry(models.Model):
     """
     The doctor's live consultation queue. Created automatically when
-    receptionist calls token.check_in(). Priority + token order decide
-    queue_position, recomputed via reorder() whenever a high-priority
-    patient is inserted.
+    receptionist calls token.check_in(). Priority, on-time vs late, and token
+    serial decide queue_position (see core.services.queue_order).
     """
     PRIORITY_CHOICES = (('high', 'High'), ('normal', 'Normal'))
     STATUS_CHOICES = (
@@ -461,23 +460,11 @@ class QueueEntry(models.Model):
         """
         Computed live rather than stored — avoids stale positions when
         a high-priority patient is inserted after others are waiting.
-        High priority first, then by token creation order (FCFS).
-
-        NOTE: sorting by '-priority' as a string is WRONG — alphabetically
-        'normal' > 'high', so that would put normal patients first. We
-        sort by an explicit priority weight instead.
+        See core.services.queue_order for the canonical sort rules.
         """
-        waiting_entries = QueueEntry.objects.filter(
-            slot=self.slot,
-            queue_status='waiting',
-        ).order_by('token__created_at')
-        ordered_ids = sorted(
-            waiting_entries.values_list('id', 'priority'),
-            key=lambda row: (0 if row[1] == 'high' else 1,)
-        )
-        # stable sort preserves token__created_at order within same priority
-        ids = [row[0] for row in ordered_ids]
-        return ids.index(self.id) + 1 if self.id in ids else None
+        from core.services.queue_order import queue_position_for_entry
+
+        return queue_position_for_entry(self)
 
     def __str__(self):
         return f"Queue #{self.queue_position} - {self.token.token_number} ({self.queue_status})"
@@ -866,7 +853,7 @@ class DailyAnalytics(models.Model):
             defaults={
                 'total_tokens_issued': tokens.count(),
                 'total_checkins': tokens.exclude(status__in=['booked', 'cancelled']).count(),
-                'total_no_shows': tokens.filter(status__in=['missed', 'expired']).count(),
+                'total_no_shows': tokens.filter(status='expired').count(),
                 'avg_wait_minutes': sum(wait_times) / len(wait_times) if wait_times else None,
                 'avg_consultation_minutes': sum(consult_times) / len(consult_times) if consult_times else None,
                 'throttle_events_count': slot.throttle_logs.filter(action='throttled').count(),

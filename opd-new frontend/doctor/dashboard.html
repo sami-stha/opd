@@ -415,7 +415,7 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260712i"></script>
+    <script src="../js/app.js?v=20260804b"></script>
     <script src="../js/api.js?v=20260712i"></script>
     <script>
       let queue = [];
@@ -453,7 +453,7 @@
           is_disabled: !!p.is_disabled,
           is_followup: !!p.is_followup,
           start_time: p.start_time,
-          position: p.position || p.queue_position || 999,
+          position: p.queue_position || p.position || 999,
         };
       }
 
@@ -668,7 +668,7 @@
               <div style="margin-top:0.5rem;">
                 <strong>Prescriptions</strong>
                 <ul style="margin:0.25rem 0 0; padding-left:1.25rem;">
-                  ${rxList.map(p => `<li>${escapeHtml(p.medicine_name)} — ${escapeHtml(p.dosage || '')} ${escapeHtml(p.frequency || '')} ${p.duration_days ? `(${p.duration_days} days)` : ''}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
+                  ${rxList.map(p => `<li>${typeof PrescriptionFormat !== 'undefined' ? escapeHtml(PrescriptionFormat.lineSummary(p)) : escapeHtml(p.medicine_name)}${p.dispensed ? ' · Dispensed' : ''}</li>`).join('')}
                 </ul>
               </div>` : ''}
             ${labList.length ? `

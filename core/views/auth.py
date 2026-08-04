@@ -40,6 +40,21 @@ def patient_register(request):
     address = request.data.get('address', '')
     otp = request.data.get('otp')
     patient_id = request.data.get('patient_id')
+    gender_raw = request.data.get('gender')
+
+    def _normalize_gender(value):
+        if not value:
+            return ''
+        raw = str(value).strip().lower()
+        if raw in ('male', 'm'):
+            return 'male'
+        if raw in ('female', 'f'):
+            return 'female'
+        if raw in ('other', 'o'):
+            return 'other'
+        return ''
+
+    gender = _normalize_gender(gender_raw)
 
     if not all([phone, password]):
         return Response({'success': False, 'error': 'Phone and password required'}, status=400)
@@ -72,6 +87,8 @@ def patient_register(request):
             existing.age = int(age)
         if address:
             existing.address = address
+        if gender:
+            existing.gender = gender
         existing.save()
         api_token = issue_api_token(existing)
         return Response({
@@ -112,6 +129,7 @@ def patient_register(request):
         last_name=' '.join(full_name.split()[1:]) if ' ' in full_name else '',
         age=int(age) if age else None,
         address=address,
+        gender=gender,
     )
     user.assign_patient_code()
     user.save()
