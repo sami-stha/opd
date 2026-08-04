@@ -107,6 +107,32 @@ class OPDTestCase(TestCase):
             data['estimated_time'] = self.make_slot_datetime(slot, 30)
             return Token.objects.create(slot=slot, **data)
 
+    def fulfill_esewa_session(self, transaction_uuid, esewa_code='TEST'):
+        from core.models import GatewayPaymentSession
+        from core.views.esewa_payments import _fulfill_session
+
+        session = GatewayPaymentSession.objects.get(transaction_uuid=transaction_uuid)
+        session = _fulfill_session(
+            session,
+            esewa_code=esewa_code,
+            status_payload={'status': 'COMPLETE'},
+        )
+        self.assertEqual(session.status, 'completed', session.error_message or session.status)
+        return session
+
+    def pay_lab_via_esewa(self, order, patient_user):
+        from core.views.esewa_payments import esewa_initiate_lab_order
+
+        response = self.api_post(
+            esewa_initiate_lab_order,
+            f'/api/core/payments/esewa/lab-order/{order.id}/',
+            {},
+            user=patient_user,
+            order_id=order.id,
+        )
+        self.assertTrue(response.data['success'], response.data.get('error'))
+        return self.fulfill_esewa_session(response.data['transaction_uuid'])
+
     def book_via_api(
         self,
         slot,
@@ -135,7 +161,9 @@ class OPDTestCase(TestCase):
                 payload,
             )
         self.assertTrue(response.data['success'], response.data.get('error'))
-        token = Token.objects.get(id=response.data['token']['token_id'])
+        session = self.fulfill_esewa_session(response.data['transaction_uuid'])
+        token = session.token
+        self.assertIsNotNone(token)
         return token, response.data
 
     def check_in_token(self, token, receptionist):

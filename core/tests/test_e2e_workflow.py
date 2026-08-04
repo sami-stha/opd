@@ -13,7 +13,6 @@ from core.views.lab import lab_complete_test, lab_queue, lab_start_test
 from core.views.patient_portal import (
     patient_book_followup,
     patient_followups,
-    patient_pay_lab_fee,
 )
 from core.views.pharmacy import (
     pharmacy_complete_dispense,
@@ -69,15 +68,8 @@ class FullOnlinePatientWorkflowTests(OPDTestCase):
         order = LabOrder.objects.get(token=token)
         self.assertEqual(order.status, 'fee_pending')
 
-        # Patient self-pay removes from reception lab queue
-        pay_res = self.api_post(
-            patient_pay_lab_fee,
-            f'/api/core/patient/lab-pay/{order.id}/',
-            {},
-            user=self.patient,
-            order_id=order.id,
-        )
-        self.assertTrue(pay_res.data['success'])
+        self.pay_lab_via_esewa(order, self.patient)
+
         order.refresh_from_db()
         self.assertEqual(order.status, 'in_queue')
 

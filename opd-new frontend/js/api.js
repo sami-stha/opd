@@ -87,6 +87,14 @@ const API = {
     post(path, body, options) { return this.request('POST', path, body, false, options); },
     put(path, body, options) { return this.request('PUT', path, body, false, options); },
 
+    maybeEsewaRedirect(res) {
+        if (res && res.success && res.form_url && res.form_fields) {
+            this.submitEsewaRedirect(res.form_url, res.form_fields);
+            return true;
+        }
+        return false;
+    },
+
     // Auth
     patientRegister(d) { return this.post('/patient/register/', d, { skipAuth: true }); },
     patientLogin(d) {
@@ -145,8 +153,31 @@ const API = {
     getSlots(date) { return this.get(`/slots/${date ? '?date=' + date : ''}`); },
     getSlotConfig() { return this.get('/slot-config/'); },
     labCatalog() { return this.get('/lab-tests/'); },
-    bookToken(d) { return this.post('/book/', d); },
+    bookToken(d) {
+        return this.post('/book/', d).then((res) => {
+            this.maybeEsewaRedirect(res);
+            return res;
+        });
+    },
     cancelToken(id) { return this.post(`/cancel/${id}/`, {}); },
+    esewaInitiateBooking(d) { return this.post('/payments/esewa/booking/', d); },
+    esewaInitiateFollowup(d) { return this.post('/payments/esewa/followup/', d); },
+    esewaInitiateLabOrder(orderId) { return this.post(`/payments/esewa/lab-order/${orderId}/`, {}); },
+    esewaInitiateLabToken(tokenId) { return this.post(`/payments/esewa/lab-token/${tokenId}/`, {}); },
+    submitEsewaRedirect(formUrl, fields) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = formUrl;
+        Object.entries(fields || {}).forEach(([key, value]) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = value == null ? '' : String(value);
+            form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        form.submit();
+    },
 
     // Patient portal
     patientTokens() { return this.get('/patient/tokens/'); },

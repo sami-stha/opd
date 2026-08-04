@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
     <title>Book Appointment - General OPD</title>
     <link rel="stylesheet" href="../css/style.css">
     <style>
@@ -85,15 +87,15 @@
 </div></div><div class="booking-sidebar" id="bookingSummary"></div></div><div style="display:flex; gap:1rem; margin-top:2rem;"><button class="btn btn-outline" onclick="goToStep(2)">← Back</button><button class="btn btn-primary" onclick="proceedToPayment()">Proceed to Payment →</button></div></div>
 
         <!-- Step 4: Payment -->
-        <div id="step4" style="display:none;"><div class="grid grid-2" style="gap:2rem;"><div><h2 style="margin-bottom:1.5rem;">Select Payment Method</h2><div class="payment-method" onclick="selectPayment('esewa')" id="paymentEsewa"><div style="display:flex; justify-content:space-between;"><div style="display:flex; gap:1rem;"><span class="payment-icon-box" data-icon="card" data-icon-size="22"></span><div><strong>eSewa</strong><div style="font-size:0.75rem;">Nepal's Digital Wallet</div></div></div><span id="esewaAmount" style="font-weight:bold; color:var(--secondary);"></span></div></div><div class="payment-method" onclick="selectPayment('khalti')" id="paymentKhalti"><div style="display:flex; justify-content:space-between;"><div style="display:flex; gap:1rem;"><span class="payment-icon-box" data-icon="bank" data-icon-size="22"></span><div><strong>Khalti</strong><div style="font-size:0.75rem;">Digital Wallet</div></div></div><span id="khaltiAmount" style="font-weight:bold; color:var(--secondary);"></span></div></div></div><div class="booking-sidebar" id="paymentSummary"></div></div><div style="display:flex; gap:1rem; margin-top:2rem;"><button class="btn btn-outline" onclick="goToStep(3)">← Back</button><button class="btn btn-success" onclick="processPayment()">Pay Now →</button></div></div>
+        <div id="step4" style="display:none;"><div class="grid grid-2" style="gap:2rem;"><div><h2 style="margin-bottom:1.5rem;">Pay with eSewa</h2><p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">You will be redirected to eSewa to complete payment securely.</p><div class="payment-method selected" id="paymentEsewa"><div style="display:flex; justify-content:space-between;"><div style="display:flex; gap:1rem;"><span class="payment-icon-box" data-icon="card" data-icon-size="22"></span><div><strong>eSewa</strong><div style="font-size:0.75rem;">Nepal's Digital Wallet</div></div></div><span id="esewaAmount" style="font-weight:bold; color:var(--secondary);"></span></div></div></div><div class="booking-sidebar" id="paymentSummary"></div></div><div style="display:flex; gap:1rem; margin-top:2rem;"><button class="btn btn-outline" onclick="goToStep(3)">← Back</button><button class="btn btn-success" onclick="processPayment()">Pay with eSewa →</button></div></div>
 
         <!-- Step 5: Confirmation -->
         <div id="step5" style="display:none;"><div class="token-display" id="tokenDisplay"></div></div>
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260710i"></script>
-    <script src="../js/api.js?v=20260710i"></script>
+    <script src="../js/app.js?v=20260811"></script>
+    <script src="../js/api.js?v=20260811"></script>
     <script>
         let selectedDate = null, selectedDoctor = null, selectedPayment = null, bookingData = {};
         let apiSlots = { today: [], tomorrow: [] };
@@ -121,6 +123,8 @@
                 booked: s.tokens_booked,
                 total: s.max_tokens,
                 fee: s.fee,
+                service_charge: s.service_charge,
+                total_fee: s.total_fee,
                 date: s.date,
                 is_ended: !!s.is_ended,
                 is_full: !!s.is_full,
@@ -153,18 +157,26 @@
             renderDates();
         }
         
+        function getServiceCharge(fee) {
+            if (selectedDoctor && selectedDoctor.service_charge != null) {
+                return Number(selectedDoctor.service_charge);
+            }
+            return Math.round(Number(fee || 0) * 0);
+        }
+
         function getPaymentTotal() {
+            if (selectedDoctor && selectedDoctor.total_fee != null) {
+                return Number(selectedDoctor.total_fee);
+            }
             const fee = selectedDoctor.fee;
-            const sc = Math.round(fee * 0.015);
-            return fee + sc;
+            return fee + getServiceCharge(fee);
         }
 
         function renderPaymentSummary() {
             const fee = selectedDoctor.fee;
-            const sc = Math.round(fee * 0.015);
-            const total = fee + sc;
+            const sc = getServiceCharge(fee);
+            const total = getPaymentTotal();
             document.getElementById('esewaAmount').innerHTML = `Rs.${total}`;
-            document.getElementById('khaltiAmount').innerHTML = `Rs.${total}`;
             document.getElementById('paymentSummary').innerHTML = `
                 <h3>Payment Summary</h3>
                 <div style="border-bottom:1px solid var(--border); padding-bottom:0.5rem;">
@@ -175,6 +187,77 @@
                 <p><strong>Service Charge:</strong> Rs.${sc}</p>
                 <hr style="border-color:var(--border);">
                 <p style="font-size:1.25rem;"><strong>Total:</strong> Rs.${total}</p>`;
+        }
+
+        function formatTokenSlotTime(t) {
+            const bounds = TimeUtils.getSlotBounds({
+                slot_type_raw: t.slot_type_raw || t.slot_type,
+                start_time: t.start_time,
+                end_time: t.end_time,
+            });
+            return bounds.displayTime || `${t.start_time || ''} - ${t.end_time || ''}`.trim();
+        }
+
+        function showTokenConfirmation(token, totalAmount, paymentLabel = 'eSewa') {
+            const dateLabel = TimeUtils.formatApptDateLabel(token.date);
+            const slotLabel = formatTokenSlotTime(token);
+            const estTime = token.estimated_time || '—';
+            const amountLabel = `Rs. ${Math.round(Number(totalAmount || 0))}`;
+            const checkinHint = estTime && estTime !== '—'
+                ? `Arrive at reception 15 minutes before ${estTime} for check-in.`
+                : 'Arrive at reception 15 minutes before your estimated time for check-in.';
+
+            document.getElementById('tokenDisplay').innerHTML = `
+                <div id="printableToken">
+                    <div style="font-size:0.75rem; letter-spacing:2px;">GENERAL OPD</div>
+                    <div style="font-size:0.7rem; margin-bottom:0.5rem;">APPOINTMENT TOKEN</div>
+                    <div class="token-number">${escapeHtml(token.token_number)}</div>
+                    <div class="token-receipt-divider"></div>
+                    <div class="token-receipt-row"><span>Patient</span><span>${escapeHtml(token.patient_name)}</span></div>
+                    <div class="token-receipt-row"><span>Doctor</span><span>${escapeHtml(token.doctor_name)}</span></div>
+                    <div class="token-receipt-row"><span>Physician</span><span>${DOCTOR_ROLE_LABEL}</span></div>
+                    <div class="token-receipt-row"><span>Date</span><span>${escapeHtml(dateLabel)}</span></div>
+                    <div class="token-receipt-row"><span>Slot</span><span>${escapeHtml(slotLabel)}</span></div>
+                    <div class="token-receipt-row"><span>Est. Time</span><span>${escapeHtml(estTime)}</span></div>
+                    <div class="token-receipt-row"><span>Payment</span><span>${escapeHtml(paymentLabel)}</span></div>
+                    <div class="token-receipt-row"><span>Amount</span><span>${escapeHtml(amountLabel)}</span></div>
+                    <div class="token-receipt-note">${escapeHtml(checkinHint)}</div>
+                    <div style="display:flex; gap:1rem; margin-top:1.25rem; justify-content:center; flex-wrap:wrap; font-family:inherit;">
+                        <button type="button" class="btn btn-primary" onclick="window.location.href='dashboard.html'">Go to Dashboard</button>
+                        <button type="button" class="btn btn-outline" onclick="downloadToken()">Download</button>
+                        <button type="button" class="btn btn-outline" onclick="window.print()">Print Token</button>
+                    </div>
+                </div>`;
+            goToStep(5);
+            Toast.show('Payment successful! Your token is booked.', 'success');
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        async function handlePostPaymentReturn() {
+            const params = new URLSearchParams(window.location.search);
+            if (!params.get('confirmed') || !params.get('uuid')) return false;
+
+            LoadingOverlay.show();
+            try {
+                const res = await API.get(`/payments/esewa/status/${encodeURIComponent(params.get('uuid'))}/`);
+                LoadingOverlay.hide();
+                if (!res.success || res.status !== 'completed' || !res.token) {
+                    Toast.show(res.error || 'Payment received but token details could not be loaded.', 'warning');
+                    return false;
+                }
+                showTokenConfirmation(res.token, res.total_amount, res.payment_method || 'eSewa');
+                if (window.history.replaceState) {
+                    window.history.replaceState({}, '', 'booking.html');
+                }
+                return true;
+            } catch {
+                LoadingOverlay.hide();
+                Toast.show('Could not confirm payment status.', 'error');
+                return false;
+            }
         }
 
         function downloadToken() {
@@ -297,6 +380,9 @@
             
             document.querySelectorAll('.doctor-card').forEach(c=>c.classList.remove('selected'));
             document.querySelector(`[data-doctor-id="${slotId}"]`).classList.add('selected');
+            const fee = selectedDoctor.fee;
+            const sc = getServiceCharge(fee);
+            const total = fee + sc;
             document.getElementById('bookingSummary').innerHTML = `
                 <h3 style="margin-bottom:1rem;">Booking Summary</h3>
                 <div style="border-bottom:1px solid var(--border); padding-bottom:0.5rem;">
@@ -305,10 +391,10 @@
                     <p><strong>Date:</strong> ${selectedDate==='today'?'Today':'Tomorrow'}</p>
                     <p><strong>Time:</strong> ${selectedDoctor.time}</p>
                 </div>
-                <p><strong>Consultation Fee:</strong> Rs.${selectedDoctor.fee}</p>
-                <p><strong>Service Charge:</strong> Rs.${Math.round(selectedDoctor.fee*0.015)}</p>
+                <p><strong>Consultation Fee:</strong> Rs.${fee}</p>
+                <p><strong>Service Charge:</strong> Rs.${sc}</p>
                 <hr style="border-color:var(--border);">
-                <p style="font-size:1.25rem;"><strong>Total:</strong> Rs.${selectedDoctor.fee+Math.round(selectedDoctor.fee*0.015)}</p>
+                <p style="font-size:1.25rem;"><strong>Total:</strong> Rs.${total}</p>
             `;
             goToStep(3);
         }
@@ -444,7 +530,38 @@
             }); 
             if(step===4){ 
                 renderPaymentSummary();
+                selectedPayment = 'esewa';
             } 
+        }
+
+        function submitEsewaForm(formUrl, fields) {
+            if (typeof API.submitEsewaRedirect === 'function') {
+                API.submitEsewaRedirect(formUrl, fields);
+                return;
+            }
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = formUrl;
+            Object.entries(fields || {}).forEach(([key, value]) => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            });
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        function redirectToEsewa(res) {
+            if (typeof API !== 'undefined' && API.maybeEsewaRedirect && API.maybeEsewaRedirect(res)) {
+                return true;
+            }
+            if (res && res.success && res.form_url && res.form_fields) {
+                submitEsewaForm(res.form_url, res.form_fields);
+                return true;
+            }
+            return false;
         }
         
         function selectPayment(method) { 
@@ -453,8 +570,8 @@
             document.getElementById(`payment${method.charAt(0).toUpperCase()+method.slice(1)}`).classList.add('selected'); 
         }
         
-        function processPayment() {
-            if(!selectedPayment){Toast.show('Select payment method','error');return;}
+        async function processPayment() {
+            selectedPayment = 'esewa';
             if (selectedDate === 'today' && isSlotPassed(selectedDoctor.slot)) {
                 Toast.show('This slot has already passed. Please select a different slot.', 'error');
                 return;
@@ -491,57 +608,41 @@
                 patient_age: patientAge,
                 patient_phone: patientPhone,
                 patient_address: patientAddress,
-                payment_method: selectedPayment,
                 amount: Math.round(finalAmount),
+                payment_method: 'esewa',
             };
             if (patientId) payload.patient_id = patientId;
 
-            Toast.show('Processing payment...','info');
+            Toast.show('Redirecting to eSewa...', 'info');
             LoadingOverlay.show();
-            API.bookToken(payload).then(res => {
+            try {
+                let res;
+                if (typeof API.esewaInitiateBooking === 'function') {
+                    res = await API.esewaInitiateBooking(payload);
+                    if (redirectToEsewa(res)) return;
+                } else {
+                    res = await API.bookToken(payload);
+                    if (res.success && res.form_url) return;
+                }
                 LoadingOverlay.hide();
-                if (!res.success) { 
+                if (!res.success) {
                     if (res.requires_old_patient) {
                         Toast.show(res.error || 'Please select Old Patient and verify your Patient ID', 'warning');
                         document.querySelector('input[name="patientType"][value="old"]').checked = true;
                         togglePatientForm();
                         return;
                     }
-                    Toast.show(res.error || 'Booking failed', 'error'); 
-                    return; 
+                    Toast.show(res.error || 'Could not start eSewa payment', 'error');
+                    return;
                 }
-                if (res.sms_sent === false && res.sms_warning) {
-                    Toast.show(`Booked, but SMS not delivered: ${res.sms_warning}`, 'warning');
-                }
-                const t = res.token;
-                const visitDate = selectedDate === 'today' ? 'Today' : tomorrowDate.toLocaleDateString();
-                document.getElementById('tokenDisplay').innerHTML = `
-                  <div class="token-display" id="printableToken">
-                    <div style="font-size:0.75rem; letter-spacing:2px;">GENERAL OPD</div>
-                    <div style="font-size:0.7rem; margin-bottom:0.5rem;">APPOINTMENT TOKEN</div>
-                    <div class="token-number">${t.token_number}</div>
-                    <div class="token-receipt-divider"></div>
-                    <div class="token-receipt-row"><span>Patient</span><span>${t.patient_name}</span></div>
-                    <div class="token-receipt-row"><span>Doctor</span><span>${selectedDoctor.name}</span></div>
-                    <div class="token-receipt-row"><span>Physician</span><span>${DOCTOR_ROLE_LABEL}</span></div>
-                    <div class="token-receipt-row"><span>Date</span><span>${visitDate}</span></div>
-                    <div class="token-receipt-row"><span>Slot</span><span>${selectedDoctor.time}</span></div>
-                    <div class="token-receipt-row"><span>Est. Time</span><span>${t.estimated_time}</span></div>
-                    <div class="token-receipt-row"><span>Payment</span><span>${selectedPayment === 'esewa' ? 'eSewa' : 'Khalti'}</span></div>
-                    <div class="token-receipt-row"><span>Amount</span><span>Rs. ${Math.round(finalAmount)}</span></div>
-                    <div class="token-receipt-note">Arrive at reception 15 minutes before ${t.estimated_time} for check-in.</div>
-                    <div style="display:flex; gap:1rem; margin-top:1.25rem; justify-content:center; flex-wrap:wrap; font-family: inherit;">
-                      <button class="btn btn-primary" onclick="window.location.href='dashboard.html'">Go to Dashboard</button>
-                      <button class="btn btn-outline" onclick="downloadToken()">Download</button>
-                      <button class="btn btn-outline" onclick="window.print()">Print Token</button>
-                    </div>
-                  </div>`;
-                goToStep(5);
-                Toast.show('Payment successful! Token booked.','success');
-            });
+                Toast.show('Could not redirect to eSewa. Hard refresh (Ctrl+Shift+R) and try again.', 'error');
+            } catch {
+                LoadingOverlay.hide();
+                Toast.show('Could not connect to payment gateway', 'error');
+            }
         }
 
-        loadSlots();
+        loadSlots().then(() => handlePostPaymentReturn());
     </script>
 </body>
 </html>

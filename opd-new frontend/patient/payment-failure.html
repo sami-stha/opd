@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Failed - General OPD</title>
+    <link rel="stylesheet" href="../css/style.css?v=20260804" />
+  </head>
+  <body>
+    <div class="main-content" style="max-width: 560px; margin: 3rem auto; padding: 2rem;">
+      <div class="card" style="text-align: center;">
+        <div style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;">✕</div>
+        <h1 style="margin-bottom: 0.5rem;">Payment Not Completed</h1>
+        <p id="reasonText" style="color: var(--text-muted); margin-bottom: 1.5rem;">
+          Your payment was cancelled or could not be verified.
+        </p>
+        <button class="btn btn-primary" onclick="window.location.href='dashboard.html'">Back to Dashboard</button>
+        <button class="btn btn-outline" style="margin-left:0.5rem;" onclick="window.location.href='booking.html'">Try Booking Again</button>
+      </div>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const reason = params.get('reason') || '';
+      const el = document.getElementById('reasonText');
+      if (reason === 'cancelled') {
+        el.textContent = 'You cancelled the payment on eSewa. No charges were made.';
+      } else if (reason === 'invalid_callback') {
+        el.textContent = 'Payment response could not be verified. Contact reception if money was deducted.';
+      } else if (reason === 'Amount mismatch') {
+        el.textContent = 'Payment amount mismatch. Contact reception for assistance.';
+      }
+    </script>
+  </body>
+</html>

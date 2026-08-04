@@ -8,7 +8,7 @@ from core.services.workflow import after_lab_report_uploaded, complete_consultat
 from core.tests.base import OPDTestCase
 from core.views.lab import lab_queue
 from core.views.reception import pay_lab_fee
-from core.views.patient_portal import patient_pay_lab_fee
+from core.views.esewa_payments import esewa_initiate_lab_order
 
 
 class LabPaymentQueueFlowTests(OPDTestCase):
@@ -138,14 +138,7 @@ class PatientLabSelfPayTests(OPDTestCase):
         order = LabOrder.objects.get(token=self.token)
         self.assertEqual(order.status, 'fee_pending')
 
-        pay_response = self.api_post(
-            patient_pay_lab_fee,
-            f'/api/core/patient/lab-pay/{order.id}/',
-            {},
-            user=self.patient_user,
-            order_id=order.id,
-        )
-        self.assertTrue(pay_response.data['success'])
+        self.pay_lab_via_esewa(order, self.patient_user)
 
         order.refresh_from_db()
         self.assertEqual(order.status, 'in_queue')
@@ -165,18 +158,11 @@ class PatientLabSelfPayTests(OPDTestCase):
         )
         order = LabOrder.objects.get(token=self.token)
 
-        first_response = self.api_post(
-            patient_pay_lab_fee,
-            f'/api/core/patient/lab-pay/{order.id}/',
-            {},
-            user=self.patient_user,
-            order_id=order.id,
-        )
-        self.assertTrue(first_response.data['success'])
+        self.pay_lab_via_esewa(order, self.patient_user)
 
         second_response = self.api_post(
-            patient_pay_lab_fee,
-            f'/api/core/patient/lab-pay/{order.id}/',
+            esewa_initiate_lab_order,
+            f'/api/core/payments/esewa/lab-order/{order.id}/',
             {},
             user=self.patient_user,
             order_id=order.id,

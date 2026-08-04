@@ -747,6 +747,52 @@ class Payment(models.Model):
         return f"{self.payment_type} - {self.token.token_number} ({self.status})"
 
 
+class GatewayPaymentSession(models.Model):
+    """Pending eSewa payment before booking / lab fee is fulfilled."""
+    PURPOSE_CHOICES = (
+        ('consultation_booking', 'Consultation booking'),
+        ('followup_booking', 'Follow-up booking'),
+        ('lab_order', 'Lab order'),
+        ('lab_token', 'Lab token bulk'),
+    )
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    )
+
+    transaction_uuid = models.CharField(max_length=64, unique=True, db_index=True)
+    gateway = models.CharField(max_length=20, default='esewa')
+    purpose = models.CharField(max_length=30, choices=PURPOSE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    service_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    delivery_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    patient_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='gateway_sessions',
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    esewa_transaction_code = models.CharField(max_length=50, blank=True)
+    payment = models.ForeignKey(
+        'Payment', on_delete=models.SET_NULL, null=True, blank=True, related_name='gateway_sessions',
+    )
+    token = models.ForeignKey(
+        'Token', on_delete=models.SET_NULL, null=True, blank=True, related_name='gateway_sessions',
+    )
+    error_message = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.transaction_uuid} ({self.purpose}, {self.status})'
+
+
 class FollowupRule(models.Model):
     """
     Admin-configurable follow-up fee exemption policy. Only one row

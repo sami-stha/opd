@@ -17,7 +17,8 @@ from core.services.followup import (
     resolve_followup_visit_date,
 )
 from core.utils import consultation_fee_with_charge
-from core.services.lab_payments import LabPaymentError, PENDING_LAB_STATUSES, pay_lab_order, pay_lab_orders_for_token
+from core.services.lab_payments import PENDING_LAB_STATUSES
+from core.services.lab_orders import normalize_pending_lab_order_names, repair_corrupt_lab_orders
 from core.utils import format_local_time, doctor_name_short, doctor_specialty, serialize_token
 
 
@@ -55,16 +56,6 @@ def _patient_pending_lab_orders(user):
 
 def _patient_token_belongs_to_user(user, token_id):
     return Token.objects.filter(_patient_token_filter(user), id=token_id).exists()
-
-
-def _lab_payment_reference(request, default_suffix):
-    """Build gateway reference like esewa-lab-12 (same pattern as appointment booking)."""
-    method = (request.data.get('payment_method') or 'esewa').lower().strip()
-    if method not in ('esewa', 'khalti'):
-        method = 'esewa'
-    custom = (request.data.get('reference_number') or '').strip()
-    reference = custom or f'{method}-{default_suffix}'
-    return reference, method
 
 
 @api_view(['GET'])
@@ -315,6 +306,14 @@ def patient_book_followup(request):
     except ConsultationSlot.DoesNotExist:
         return Response({'success': False, 'error': 'Slot not found'}, status=404)
 
+    from core.services.followup import is_fee_exempt
+    if not is_fee_exempt(original, slot.date):
+        return Response({
+            'success': False,
+            'error': 'Pay follow-up fee via eSewa using the Pay with eSewa button.',
+            'requires_esewa_redirect': True,
+        }, status=400)
+
     try:
         followup, fee_exempt = book_followup_via_slot(
             original,
@@ -354,70 +353,18 @@ def patient_lab_payments(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsPatient])
 def patient_pay_lab_fee(request, order_id):
-    try:
-        order = LabOrder.objects.select_related('token').get(id=order_id)
-    except LabOrder.DoesNotExist:
-        return Response({'success': False, 'error': 'Lab order not found'}, status=404)
-
-    if not _patient_token_belongs_to_user(request.user, order.token_id):
-        return Response({'success': False, 'error': 'Lab order not found'}, status=404)
-
-    try:
-        reference, payment_method = _lab_payment_reference(request, f'lab-{order_id}')
-        order, payment, entry = pay_lab_order(
-            order_id,
-            order.fee,
-            request.user,
-            reference,
-        )
-    except LabPaymentError as exc:
-        return Response({'success': False, 'error': exc.message}, status=exc.status_code)
-
     return Response({
-        'success': True,
-        'message': 'Lab fee paid successfully',
-        'order_id': order.id,
-        'payment_id': payment.id,
-        'amount': float(payment.amount),
-        'status': order.status,
-        'payment_status': 'paid',
-        'payment_method': payment_method,
-        'reference_number': payment.reference_number,
-        'paid_at': payment.paid_at.isoformat(),
-        'paid_at_display': format_local_time(payment.paid_at, '%d %b %Y, %I:%M %p'),
-        'queue_entry_id': entry.id,
-    })
+        'success': False,
+        'error': 'Pay lab fees via eSewa using the Pay button in Lab Payments.',
+        'requires_esewa_redirect': True,
+    }, status=400)
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsPatient])
 def patient_pay_lab_fees_for_token(request, token_id):
-    if not _patient_token_belongs_to_user(request.user, token_id):
-        return Response({'success': False, 'error': 'Appointment not found'}, status=404)
-
-    repair_corrupt_lab_orders(token_id)
-    try:
-        reference, payment_method = _lab_payment_reference(request, f'lab-token-{token_id}')
-        orders, payments, entries, total = pay_lab_orders_for_token(
-            token_id,
-            request.user,
-            reference,
-        )
-    except LabPaymentError as exc:
-        return Response({'success': False, 'error': exc.message}, status=exc.status_code)
-
-    paid_at = payments[-1].paid_at if payments else None
     return Response({
-        'success': True,
-        'message': 'Lab fees paid successfully',
-        'token_id': token_id,
-        'orders_paid': len(orders),
-        'total_amount': float(total),
-        'payment_status': 'paid',
-        'payment_method': payment_method,
-        'reference_number': payments[-1].reference_number if payments else reference,
-        'paid_at': paid_at.isoformat() if paid_at else None,
-        'paid_at_display': format_local_time(paid_at, '%d %b %Y, %I:%M %p') if paid_at else None,
-        'payment_ids': [p.id for p in payments],
-        'queue_entry_ids': [e.id for e in entries],
-    })
+        'success': False,
+        'error': 'Pay lab fees via eSewa using the Pay button in Lab Payments.',
+        'requires_esewa_redirect': True,
+    }, status=400)

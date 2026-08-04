@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Successful - General OPD</title>
+    <link rel="stylesheet" href="../css/style.css?v=20260806" />
+  </head>
+  <body>
+    <div class="main-content" style="max-width: 560px; margin: 3rem auto; padding: 2rem;">
+      <div class="card" style="text-align: center;">
+        <div style="font-size: 3rem; color: var(--success); margin-bottom: 1rem;">✓</div>
+        <h1 style="margin-bottom: 0.5rem;">Payment Successful</h1>
+        <p id="statusText" style="color: var(--text-muted); margin-bottom: 1.5rem;">Confirming your payment...</p>
+        <div id="details" style="text-align: left; margin-bottom: 1.5rem;"></div>
+        <button class="btn btn-primary" id="continueBtn" style="display:none;" onclick="goNext()">Continue</button>
+      </div>
+    </div>
+    <script src="../js/app.js?v=20260806"></script>
+    <script src="../js/api.js?v=20260806"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const type = params.get('type') || '';
+      const uuid = params.get('uuid') || '';
+      const tokenNumber = params.get('token_number') || '';
+
+      function goNext() {
+        if (type === 'booking' || type === 'followup') {
+          window.location.href = 'dashboard.html';
+        } else {
+          window.location.href = 'dashboard.html#lab-payments';
+        }
+      }
+
+      async function loadStatus() {
+        const statusEl = document.getElementById('statusText');
+        const detailsEl = document.getElementById('details');
+        const btn = document.getElementById('continueBtn');
+
+        if (!uuid) {
+          statusEl.textContent = 'Payment received.';
+          detailsEl.innerHTML = tokenNumber
+            ? `<p><strong>Token:</strong> ${tokenNumber}</p>`
+            : '';
+          btn.style.display = 'inline-block';
+          return;
+        }
+
+        try {
+          const res = await API.get(`/payments/esewa/status/${encodeURIComponent(uuid)}/`);
+          if (res.success && res.status === 'completed') {
+            statusEl.textContent =
+              type === 'booking'
+                ? 'Your appointment token has been booked.'
+                : type === 'followup'
+                  ? 'Your follow-up token has been booked.'
+                  : 'Your lab test fee has been paid.';
+            const tn = res.token_number || tokenNumber;
+            detailsEl.innerHTML = tn
+              ? `<p><strong>Token:</strong> ${tn}</p><p><strong>Amount:</strong> Rs ${Number(res.total_amount || 0).toLocaleString('en-NP')}</p>`
+              : `<p><strong>Amount:</strong> Rs ${Number(res.total_amount || 0).toLocaleString('en-NP')}</p>`;
+            btn.style.display = 'inline-block';
+          } else if (res.status === 'pending') {
+            statusEl.textContent = 'Payment is still processing. Please wait...';
+            setTimeout(loadStatus, 3000);
+          } else {
+            statusEl.textContent = res.error || 'Payment could not be confirmed.';
+            btn.textContent = 'Back to Dashboard';
+            btn.style.display = 'inline-block';
+          }
+        } catch (err) {
+          statusEl.textContent = tokenNumber
+            ? `Payment completed. Token: ${tokenNumber}`
+            : 'Payment completed.';
+          btn.style.display = 'inline-block';
+        }
+      }
+
+      loadStatus();
+    </script>
+  </body>
+</html>

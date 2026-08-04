@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
     <title>Book Follow-up - General OPD</title>
     <link rel="stylesheet" href="../css/style.css">
     <style>
@@ -94,8 +96,8 @@
     </div>
 
     <script src="../js/icons.js"></script>
-    <script src="../js/app.js?v=20260712f"></script>
-    <script src="../js/api.js?v=20260712f"></script>
+    <script src="../js/app.js?v=20260809"></script>
+    <script src="../js/api.js?v=20260809"></script>
     <script>
         const params = new URLSearchParams(window.location.search);
         const originalTokenId = parseInt(params.get('original_token_id'), 10);
@@ -291,16 +293,11 @@
                 const sc = bookingContext.service_charge || Math.round(fee * 0.015);
                 const total = bookingContext.total_fee || (fee + sc);
                 document.getElementById('paymentStepContent').innerHTML = `
-                    <h2 style="margin-bottom:1.5rem;">Select Payment Method</h2>
-                    <div class="payment-method" onclick="selectPayment('esewa')" id="paymentEsewa">
+                    <h2 style="margin-bottom:1rem;">Pay with eSewa</h2>
+                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">You will be redirected to eSewa to complete payment.</p>
+                    <div class="payment-method selected" id="paymentEsewa">
                         <div style="display:flex; justify-content:space-between;">
                             <div><strong>eSewa</strong><div style="font-size:0.75rem;">Nepal's Digital Wallet</div></div>
-                            <span style="font-weight:bold; color:var(--secondary);">Rs.${total}</span>
-                        </div>
-                    </div>
-                    <div class="payment-method" onclick="selectPayment('khalti')" id="paymentKhalti">
-                        <div style="display:flex; justify-content:space-between;">
-                            <div><strong>Khalti</strong><div style="font-size:0.75rem;">Digital Wallet</div></div>
                             <span style="font-weight:bold; color:var(--secondary);">Rs.${total}</span>
                         </div>
                     </div>`;
@@ -313,9 +310,9 @@
                     <p><strong>Service Charge:</strong> Rs.${sc}</p>
                     <hr style="border-color:var(--border);">
                     <p style="font-size:1.25rem;"><strong>Total:</strong> Rs.${total}</p>`;
-                document.getElementById('confirmBookBtn').textContent = 'Pay Now →';
+                document.getElementById('confirmBookBtn').textContent = 'Pay with eSewa →';
             }
-            selectedPayment = null;
+            selectedPayment = feeExempt ? null : 'esewa';
         }
 
         function goToStep(step) {
@@ -342,57 +339,172 @@
                 return;
             }
             const feeExempt = isFeeExemptForSlot(selectedSlot);
-            if (!feeExempt && !selectedPayment) {
-                Toast.show('Select payment method', 'error');
-                return;
-            }
 
             const payload = {
                 original_token_id: originalTokenId,
                 slot_id: selectedSlot.slot_id,
             };
-            if (!feeExempt) payload.payment_method = selectedPayment;
 
             document.getElementById('confirmBookBtn').disabled = true;
-            LoadingOverlay.show();
-            const res = await API.patientBookFollowup(payload);
-            LoadingOverlay.hide();
-            document.getElementById('confirmBookBtn').disabled = false;
 
-            if (!res.success) {
-                Toast.show(res.error || 'Booking failed', 'error');
+            if (feeExempt) {
+                LoadingOverlay.show();
+                const res = await API.patientBookFollowup(payload);
+                LoadingOverlay.hide();
+                document.getElementById('confirmBookBtn').disabled = false;
+                if (!res.success) {
+                    Toast.show(res.error || 'Booking failed', 'error');
+                    return;
+                }
+                showFollowupSuccess(res);
                 return;
             }
 
-            const t = res.token;
-            const visitLabel = selectedDate === 'today' ? 'Today' : formatDate(t.date || bookingContext.tomorrow);
-            const paymentLabel = res.fee_exempted ? 'Fee exempt (follow-up)' : (selectedPayment === 'esewa' ? 'eSewa' : 'Khalti');
-            const amountLabel = res.fee_exempted ? 'Rs. 0' : `Rs. ${Math.round(getPaymentTotal())}`;
+            Toast.show('Redirecting to eSewa...', 'info');
+            LoadingOverlay.show();
+            try {
+                const res = await API.esewaInitiateFollowup(payload);
+                if (redirectToEsewa(res)) return;
+                LoadingOverlay.hide();
+                document.getElementById('confirmBookBtn').disabled = false;
+                if (!res.success) {
+                    Toast.show(res.error || 'Could not start eSewa payment', 'error');
+                    return;
+                }
+                Toast.show('Could not redirect to eSewa. Hard refresh (Ctrl+Shift+R) and try again.', 'error');
+            } catch {
+                LoadingOverlay.hide();
+                document.getElementById('confirmBookBtn').disabled = false;
+                Toast.show('Could not connect to payment gateway', 'error');
+            }
+        }
 
-            document.getElementById('tokenDisplay').innerHTML = `
-                <div id="printableToken">
-                    <div style="font-size:0.75rem; letter-spacing:2px;">GENERAL OPD</div>
-                    <div style="font-size:0.7rem; margin-bottom:0.5rem;">FOLLOW-UP TOKEN</div>
-                    <div class="token-number">${t.token_number}</div>
-                    <div class="token-receipt-divider"></div>
-                    <div class="token-receipt-row"><span>Patient</span><span>${t.patient_name}</span></div>
-                    <div class="token-receipt-row"><span>Doctor</span><span>${bookingContext.doctor_name}</span></div>
-                    <div class="token-receipt-row"><span>Date</span><span>${visitLabel}</span></div>
-                    <div class="token-receipt-row"><span>Slot</span><span>${selectedSlot.time}</span></div>
-                    <div class="token-receipt-row"><span>Est. Time</span><span>${t.estimated_time || '—'}</span></div>
-                    <div class="token-receipt-row"><span>Payment</span><span>${paymentLabel}</span></div>
-                    <div class="token-receipt-row"><span>Amount</span><span>${amountLabel}</span></div>
-                    <div class="token-receipt-note">Arrive at reception 15 minutes before your estimated time for check-in.</div>
-                    <div style="display:flex; gap:1rem; margin-top:1.25rem; justify-content:center; flex-wrap:wrap; font-family:inherit;">
-                        <button class="btn btn-primary" onclick="window.location.href='dashboard.html'">Go to Dashboard</button>
-                        <button class="btn btn-outline" onclick="window.print()">Print Token</button>
-                    </div>
-                </div>`;
+        function redirectToEsewa(res) {
+            if (typeof API !== 'undefined' && API.maybeEsewaRedirect && API.maybeEsewaRedirect(res)) {
+                return true;
+            }
+            if (res && res.success && res.form_url && res.form_fields) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = res.form_url;
+                Object.entries(res.form_fields || {}).forEach(([key, value]) => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = value;
+                    form.appendChild(input);
+                });
+                document.body.appendChild(form);
+                form.submit();
+                return true;
+            }
+            return false;
+        }
+
+        function showFollowupSuccess(res) {
+            const t = res.token;
+            const visitLabel = TimeUtils.formatApptDateLabel(t.date || bookingContext?.tomorrow);
+            const paymentLabel = res.fee_exempted ? 'Fee exempt (follow-up)' : 'eSewa';
+            const amountLabel = res.fee_exempted ? 'Rs. 0' : `Rs. ${Math.round(getPaymentTotal())}`;
+            renderFollowupTokenReceipt(t, {
+                visitLabel,
+                slotTime: selectedSlot?.time || formatTokenSlotTime(t),
+                paymentLabel,
+                amountLabel,
+            });
             goToStep(4);
             Toast.show(res.fee_exempted ? 'Free follow-up booked!' : 'Payment successful! Token booked.', 'success');
         }
 
+        function formatTokenSlotTime(t) {
+            const bounds = TimeUtils.getSlotBounds({
+                slot_type_raw: t.slot_type_raw || t.slot_type,
+                start_time: t.start_time,
+                end_time: t.end_time,
+            });
+            return bounds.displayTime || `${t.start_time || ''} - ${t.end_time || ''}`.trim();
+        }
+
+        function renderFollowupTokenReceipt(t, opts) {
+            const doctorName = opts.doctorName || bookingContext?.doctor_name || t.doctor_name || '—';
+            document.getElementById('tokenDisplay').innerHTML = `
+                <div id="printableToken">
+                    <div style="font-size:0.75rem; letter-spacing:2px;">GENERAL OPD</div>
+                    <div style="font-size:0.7rem; margin-bottom:0.5rem;">FOLLOW-UP TOKEN</div>
+                    <div class="token-number">${escapeHtml(t.token_number)}</div>
+                    <div class="token-receipt-divider"></div>
+                    <div class="token-receipt-row"><span>Patient</span><span>${escapeHtml(t.patient_name)}</span></div>
+                    <div class="token-receipt-row"><span>Doctor</span><span>${escapeHtml(doctorName)}</span></div>
+                    <div class="token-receipt-row"><span>Physician</span><span>${DOCTOR_ROLE_LABEL}</span></div>
+                    <div class="token-receipt-row"><span>Date</span><span>${escapeHtml(opts.visitLabel)}</span></div>
+                    <div class="token-receipt-row"><span>Slot</span><span>${escapeHtml(opts.slotTime)}</span></div>
+                    <div class="token-receipt-row"><span>Est. Time</span><span>${escapeHtml(t.estimated_time || '—')}</span></div>
+                    <div class="token-receipt-row"><span>Payment</span><span>${escapeHtml(opts.paymentLabel)}</span></div>
+                    <div class="token-receipt-row"><span>Amount</span><span>${escapeHtml(opts.amountLabel)}</span></div>
+                    <div class="token-receipt-note">Arrive at reception 15 minutes before your estimated time for check-in.</div>
+                    <div style="display:flex; gap:1rem; margin-top:1.25rem; justify-content:center; flex-wrap:wrap; font-family:inherit;">
+                        <button type="button" class="btn btn-primary" onclick="window.location.href='dashboard.html'">Go to Dashboard</button>
+                        <button type="button" class="btn btn-outline" onclick="downloadFollowupToken()">Download</button>
+                        <button type="button" class="btn btn-outline" onclick="window.print()">Print Token</button>
+                    </div>
+                </div>`;
+        }
+
+        function downloadFollowupToken() {
+            const el = document.getElementById('printableToken');
+            if (!el) return;
+            const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>followup-token.html</title></head><body>${el.outerHTML}</body></html>`;
+            const blob = new Blob([html], { type: 'text/html' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `followup-token-${el.querySelector('.token-number')?.textContent?.trim() || 'token'}.html`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        async function handleFollowupPostPaymentReturn() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (!urlParams.get('confirmed') || !urlParams.get('uuid')) return false;
+
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('bookingFlow').style.display = 'block';
+
+            LoadingOverlay.show();
+            try {
+                const res = await API.get(`/payments/esewa/status/${encodeURIComponent(urlParams.get('uuid'))}/`);
+                LoadingOverlay.hide();
+                if (!res.success || res.status !== 'completed' || !res.token) {
+                    Toast.show(res.error || 'Payment received but token could not be loaded.', 'warning');
+                    return false;
+                }
+                const t = res.token;
+                renderFollowupTokenReceipt(t, {
+                    visitLabel: TimeUtils.formatApptDateLabel(t.date),
+                    slotTime: formatTokenSlotTime(t),
+                    paymentLabel: res.payment_method || 'eSewa',
+                    amountLabel: `Rs. ${Math.round(Number(res.total_amount || 0))}`,
+                    doctorName: t.doctor_name,
+                });
+                goToStep(4);
+                Toast.show('Payment successful! Follow-up token booked.', 'success');
+                if (window.history.replaceState) {
+                    const origId = urlParams.get('original_token_id') || '';
+                    const clean = origId
+                        ? `followup-booking.html?original_token_id=${origId}`
+                        : 'followup-booking.html';
+                    window.history.replaceState({}, '', clean);
+                }
+                return true;
+            } catch {
+                LoadingOverlay.hide();
+                Toast.show('Could not confirm payment status.', 'error');
+                return false;
+            }
+        }
+
         async function init() {
+            if (await handleFollowupPostPaymentReturn()) return;
+
             if (!originalTokenId) {
                 document.getElementById('loadingState').style.display = 'none';
                 document.getElementById('errorState').style.display = 'block';

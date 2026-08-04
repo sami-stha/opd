@@ -18,7 +18,11 @@ def serve_frontend_file(request, filepath='index.html'):
     if not full_path.exists() or not full_path.is_file():
         raise Http404('Page not found')
     content_type, _ = mimetypes.guess_type(str(full_path))
-    return FileResponse(open(full_path, 'rb'), content_type=content_type or 'text/html')
+    response = FileResponse(open(full_path, 'rb'), content_type=content_type or 'text/html')
+    if str(filepath).endswith('.html'):
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        response['Pragma'] = 'no-cache'
+    return response
 
 
 # Frontend static assets — must be registered before Django admin at /admin/

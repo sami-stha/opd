@@ -18,6 +18,13 @@ TWILIO_ACCOUNT_SID = config('TWILIO_ACCOUNT_SID', default='')
 TWILIO_AUTH_TOKEN = config('TWILIO_AUTH_TOKEN', default='')
 TWILIO_FROM_NUMBER = config('TWILIO_FROM_NUMBER', default='')
 
+# eSewa ePay (UAT defaults — register merchant for production keys)
+SITE_BASE_URL = config('SITE_BASE_URL', default='http://127.0.0.1:8000')
+ESEWA_PRODUCT_CODE = config('ESEWA_PRODUCT_CODE', default='EPAYTEST')
+ESEWA_SECRET_KEY = config('ESEWA_SECRET_KEY', default='8gBm/:&EnhH.1/q')
+ESEWA_UAT = config('ESEWA_UAT', default=True, cast=bool)
+ESEWA_SKIP_SIGNATURE_VERIFY = config('ESEWA_SKIP_SIGNATURE_VERIFY', default=False, cast=bool)
+
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 INSTALLED_APPS = [
@@ -141,3 +148,5 @@ if os.environ.get('DJANGO_RUNNING_TESTS') == '1':
             return None
 
     MIGRATION_MODULES = _DisableMigrations()
+
+    ESEWA_SKIP_SIGNATURE_VERIFY = True

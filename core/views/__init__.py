@@ -30,5 +30,14 @@ from .patient_portal import (
     patient_followup_booking_context, patient_book_followup,
 )
 from .patient_journey import patient_journey
+from .esewa_payments import (
+    esewa_initiate_booking,
+    esewa_initiate_followup,
+    esewa_initiate_lab_order,
+    esewa_initiate_lab_token,
+    esewa_payment_success,
+    esewa_payment_failure,
+    esewa_payment_status,
+)
 from .sync import system_sync
 from .queue import waiting_queue

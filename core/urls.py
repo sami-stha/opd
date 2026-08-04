@@ -27,6 +27,15 @@ urlpatterns = [
     path('book/', views.book_token, name='book'),
     path('cancel/<int:token_id>/', views.cancel_token_public, name='cancel'),
 
+    # eSewa gateway (redirect)
+    path('payments/esewa/booking/', views.esewa_initiate_booking, name='esewa-booking'),
+    path('payments/esewa/followup/', views.esewa_initiate_followup, name='esewa-followup'),
+    path('payments/esewa/lab-order/<int:order_id>/', views.esewa_initiate_lab_order, name='esewa-lab-order'),
+    path('payments/esewa/lab-token/<int:token_id>/', views.esewa_initiate_lab_token, name='esewa-lab-token'),
+    path('payments/esewa/success/', views.esewa_payment_success, name='esewa-success'),
+    path('payments/esewa/failure/', views.esewa_payment_failure, name='esewa-failure'),
+    path('payments/esewa/status/<str:transaction_uuid>/', views.esewa_payment_status, name='esewa-status'),
+
     # Reception
     path('search/', views.search_patient, name='search'),
     path('check-in/<int:token_id>/', views.check_in_patient, name='check-in'),

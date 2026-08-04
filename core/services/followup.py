@@ -157,7 +157,13 @@ def book_followup(original_token, visit_date, booked_by=None):
     return followup, fee_exempt
 
 
-def book_followup_via_slot(original_token, slot, booked_by, payment_method=None):
+def book_followup_via_slot(
+    original_token,
+    slot,
+    booked_by,
+    payment_method=None,
+    reference_number=None,
+):
     """Book follow-up through normal slot selection (same workflow as online booking)."""
     if followup_already_booked(original_token.id):
         existing = get_booked_followup(original_token.id)
@@ -210,9 +216,9 @@ def book_followup_via_slot(original_token, slot, booked_by, payment_method=None)
     if fee_exempt:
         _record_followup_payment(followup, booked_by, True)
     else:
-        method = (payment_method or '').lower().strip()
-        if method not in ('esewa', 'khalti'):
-            raise FollowupBookingError('Payment method required (eSewa or Khalti)', 400)
+        method = (payment_method or 'esewa').lower().strip()
+        if method != 'esewa':
+            raise FollowupBookingError('Follow-up fees must be paid via eSewa', 400)
         _, _, total = consultation_fee_with_charge()
         Payment.objects.create(
             token=followup,
@@ -221,7 +227,7 @@ def book_followup_via_slot(original_token, slot, booked_by, payment_method=None)
             status='paid',
             collected_by=booked_by,
             paid_at=timezone.now(),
-            reference_number=f'{method}-{followup.id}',
+            reference_number=reference_number or f'esewa-{followup.id}',
         )
 
     from core.services.sms import sms_token_booking

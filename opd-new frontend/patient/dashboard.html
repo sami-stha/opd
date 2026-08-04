@@ -717,7 +717,7 @@
       </div>
     </div>
 
-    <!-- Lab Payment Gateway Modal (mock eSewa / Khalti) -->
+    <!-- Lab Payment — eSewa redirect -->
     <div id="labPaymentModal" class="modal">
       <div class="modal-content" style="max-width: 480px;">
         <div class="modal-header">
@@ -779,7 +779,7 @@
 
     <script src="../js/icons.js"></script>
     <script src="../js/app.js?v=20260804b"></script>
-    <script src="../js/api.js?v=20260712d"></script>
+    <script src="../js/api.js?v=20260805"></script>
     <script>
       // Prefer real visit status; only use slot-time labels for booked appointments.
       // Past-day visits left open (With Doctor / Lab / Pharmacy) are treated as completed.
@@ -1165,7 +1165,7 @@
           slot_type_raw: t.slot_type_raw,
           start_time: t.start_time,
           end_time: t.end_time,
-          amount: 660,
+          amount: 100,
           status: t.status,
           display_status: t.display_status || AppointmentStatus.label(t.status),
           pharmacy_status: t.pharmacy_status || null,
@@ -1826,8 +1826,27 @@
         renderPaidLabPayments();
       }
 
-      function labPaymentMethodLabel(method) {
-        return method === 'khalti' ? 'Khalti' : 'eSewa';
+      function labPaymentMethodLabel() {
+        return 'eSewa';
+      }
+
+      function submitEsewaForm(formUrl, fields) {
+        if (typeof API.submitEsewaRedirect === 'function') {
+          API.submitEsewaRedirect(formUrl, fields);
+          return;
+        }
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = formUrl;
+        Object.entries(fields || {}).forEach(([key, value]) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = key;
+          input.value = value;
+          form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        form.submit();
       }
 
       function openLabPaymentModal(orderId) {
@@ -1837,7 +1856,7 @@
           return;
         }
         labPaymentContext = { mode: 'single', orderId, tokenId: item.token_id, items: [item], total: Number(item.amount || 0) };
-        selectedLabPaymentMethod = null;
+        selectedLabPaymentMethod = 'esewa';
         renderLabPaymentModal();
         document.getElementById('labPaymentModal').classList.add('active');
       }
@@ -1852,7 +1871,7 @@
         }
         const total = items.reduce((sum, p) => sum + Number(p.amount || 0), 0);
         labPaymentContext = { mode: 'token', tokenId, items, total };
-        selectedLabPaymentMethod = null;
+        selectedLabPaymentMethod = 'esewa';
         renderLabPaymentModal();
         document.getElementById('labPaymentModal').classList.add('active');
       }
@@ -1881,15 +1900,14 @@
 
         body.innerHTML = `
           <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">
-            Select a payment method to complete your lab test fee (mock gateway — same flow as appointment booking).
+            Pay your lab test fee via <strong>eSewa</strong>. You will be redirected to the eSewa payment page.
           </p>
           <div class="lab-payment-summary">
             <div class="lab-payment-summary-row"><span>Token</span><span>${escapeHtml(ctx.items[0]?.token_number || '—')}</span></div>
             ${testsHtml}
             <div class="lab-payment-summary-row lab-payment-summary-total"><span>Total</span><span>${total}</span></div>
           </div>
-          <h4 style="margin:0 0 0.75rem; font-size:0.95rem;">Select Payment Method</h4>
-          <div class="lab-payment-method ${selectedLabPaymentMethod === 'esewa' ? 'selected' : ''}" onclick="selectLabPaymentMethod('esewa')">
+          <div class="lab-payment-method selected">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div style="display:flex; gap:1rem; align-items:center;">
                 <span class="payment-icon-box" data-icon="card" data-icon-size="22"></span>
@@ -1897,20 +1915,11 @@
               </div>
               <strong style="color:var(--secondary);">${total}</strong>
             </div>
-          </div>
-          <div class="lab-payment-method ${selectedLabPaymentMethod === 'khalti' ? 'selected' : ''}" onclick="selectLabPaymentMethod('khalti')">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="display:flex; gap:1rem; align-items:center;">
-                <span class="payment-icon-box" data-icon="bank" data-icon-size="22"></span>
-                <div><strong>Khalti</strong><div style="font-size:0.75rem; color:var(--text-muted);">Digital Wallet</div></div>
-              </div>
-              <strong style="color:var(--secondary);">${total}</strong>
-            </div>
           </div>`;
 
         footer.innerHTML = `
           <button type="button" class="btn btn-secondary" onclick="closeLabPaymentModal()">Cancel</button>
-          <button type="button" class="btn btn-primary" onclick="processLabGatewayPayment()" ${labPaymentLoadingId ? 'disabled' : ''}>Pay Now →</button>`;
+          <button type="button" class="btn btn-primary" onclick="processLabGatewayPayment()" ${labPaymentLoadingId ? 'disabled' : ''}>Pay with eSewa →</button>`;
 
         if (typeof MedIcons !== 'undefined' && MedIcons.inject) MedIcons.inject(body);
       }
@@ -1923,11 +1932,11 @@
         body.innerHTML = `
           <div class="alert alert-success" style="margin-bottom:1rem;">
             <strong>Payment successful</strong><br>
-            Your lab test fee has been paid via ${escapeHtml(labPaymentMethodLabel(method))}.
+            Your lab test fee has been paid via eSewa.
           </div>
           <div class="lab-payment-summary">
             <div class="lab-payment-summary-row"><span>Amount paid</span><span>${formatLabAmount(amount)}</span></div>
-            <div class="lab-payment-summary-row"><span>Payment method</span><span>${escapeHtml(labPaymentMethodLabel(method))}</span></div>
+            <div class="lab-payment-summary-row"><span>Payment method</span><span>eSewa</span></div>
             <div class="lab-payment-summary-row"><span>Reference</span><span>${escapeHtml(ref)}</span></div>
             <div class="lab-payment-summary-row"><span>Date</span><span>${escapeHtml(res.paid_at_display || '—')}</span></div>
           </div>
@@ -1937,92 +1946,29 @@
 
       async function processLabGatewayPayment() {
         if (!labPaymentContext) return;
-        if (!selectedLabPaymentMethod) {
-          Toast.show('Select a payment method', 'error');
-          return;
-        }
         if (labPaymentLoadingId) return;
 
-        const method = selectedLabPaymentMethod;
         const ctx = labPaymentContext;
         labPaymentLoadingId = ctx.mode === 'single' ? ctx.orderId : `token-${ctx.tokenId}`;
         renderLabPaymentModal();
 
-        Toast.show('Processing payment...', 'info');
+        Toast.show('Redirecting to eSewa...', 'info');
         LoadingOverlay.show();
-
-        const payload = {
-          payment_method: method,
-          reference_number:
-            ctx.mode === 'single'
-              ? `${method}-lab-${ctx.orderId}`
-              : `${method}-lab-token-${ctx.tokenId}`,
-        };
-
         let res;
         if (ctx.mode === 'single') {
-          res = await API.patientPayLabFee(ctx.orderId, payload);
+          res = await API.esewaInitiateLabOrder(ctx.orderId);
         } else {
-          res = await API.patientPayLabFeesForToken(ctx.tokenId, payload);
+          res = await API.esewaInitiateLabToken(ctx.tokenId);
         }
-
         LoadingOverlay.hide();
         labPaymentLoadingId = null;
-
         if (!res.success) {
-          Toast.show(res.error || 'Payment failed', 'error');
+          Toast.show(res.error || 'Could not start eSewa payment', 'error');
           renderLabPaymentModal();
           return;
         }
-
-        if (ctx.mode === 'single') {
-          const item = ctx.items[0];
-          pendingLabPayments = pendingLabPayments.map((p) =>
-            p.order_id === ctx.orderId
-              ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
-              : p
-          );
-          bills.unshift({
-            id: res.payment_id,
-            appointment_id: item.token_id,
-            token_number: item.token_number,
-            doctor_name: formatDoctorReceiptName(item.doctor_name || ''),
-            doctor_specialization: '',
-            visit_date: formatApptDate(item.date),
-            date: (res.paid_at_display || '').split(',')[0],
-            paid_at_display: res.paid_at_display,
-            description: 'lab fee',
-            amount: res.amount,
-            status: 'paid',
-            reference_number: res.reference_number || payload.reference_number,
-          });
-        } else {
-          const paidIds = new Set(ctx.items.map((p) => p.order_id));
-          pendingLabPayments = pendingLabPayments.map((p) =>
-            paidIds.has(p.order_id)
-              ? { ...p, payment_status: 'paid', paid_at_display: res.paid_at_display }
-              : p
-          );
-          bills.unshift({
-            id: res.payment_ids?.[0] || `token-${ctx.tokenId}`,
-            appointment_id: ctx.tokenId,
-            token_number: ctx.items[0].token_number,
-            doctor_name: formatDoctorReceiptName(ctx.items[0].doctor_name || ''),
-            doctor_specialization: '',
-            visit_date: formatApptDate(ctx.items[0].date),
-            date: (res.paid_at_display || '').split(',')[0],
-            paid_at_display: res.paid_at_display,
-            description: 'lab fee',
-            amount: res.total_amount,
-            status: 'paid',
-            reference_number: payload.reference_number,
-          });
-        }
-
-        updatePendingLabBadge();
-        renderLabPaymentsSection();
-        showLabPaymentSuccess(res, method);
-        Toast.show('Lab payment successful', 'success');
+        closeLabPaymentModal();
+        submitEsewaForm(res.form_url, res.form_fields);
       }
 
       async function refreshPendingLabPaymentsFromApi() {

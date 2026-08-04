@@ -8,8 +8,8 @@ from core.services.workflow import display_status
 
 from .models import DoctorProfile, ConsultationSlot, Token
 
-CONSULTATION_BASE_FEE = Decimal('660.00')
-SERVICE_CHARGE_RATE = Decimal('0.015')
+CONSULTATION_BASE_FEE = Decimal('100.00')
+SERVICE_CHARGE_RATE = Decimal('0')
 SLOT_TYPES = ['morning', 'afternoon', 'evening']
 ELDERLY_AGE_THRESHOLD = 70
 DOCTOR_SPECIALIZATION_LABEL = 'General Physician'
@@ -167,7 +167,8 @@ def serialize_slot(slot):
 
     tokens_left = slot.max_tokens - slot.tokens_booked
     doctor = slot.doctor
-    fee = float(CONSULTATION_BASE_FEE)
+    base, service, total = consultation_fee_with_charge()
+    fee = float(base)
     ended = is_slot_ended(slot)
     return {
         'slot_id': slot.id,
@@ -186,6 +187,8 @@ def serialize_slot(slot):
         'tokens_booked': slot.tokens_booked,
         'max_tokens': slot.max_tokens,
         'fee': fee,
+        'service_charge': float(service),
+        'total_fee': float(total),
         'is_full': slot.is_full,
         'is_ended': ended,
         'is_bookable': is_slot_bookable(slot),
@@ -322,5 +325,6 @@ def get_doctor_for_user(user):
 
 def consultation_fee_with_charge(base_fee=None):
     base = base_fee or CONSULTATION_BASE_FEE
-    service = (base * SERVICE_CHARGE_RATE).quantize(Decimal('0.01'))
+    # Match patient UI (Math.round(fee * 0.015)) so eSewa line items sum to total.
+    service = Decimal(str(round(float(base * SERVICE_CHARGE_RATE))))
     return base, service, base + service
