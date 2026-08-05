@@ -123,10 +123,26 @@ def get_next_eligible_token(doctor_id, date=None):
     return _next_token(doctor_id, date)
 
 
-def compute_kpis(date=None):
+def _coerce_date(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    return value
+
+
+def compute_kpis(date=None, monthly_start=None, monthly_end=None):
     """Compute live KPIs for the analytics dashboard."""
-    date = date or timezone.localdate()
-    monthly_overview = compute_monthly_overview(date)
+    date = _coerce_date(date) or timezone.localdate()
+    monthly_start = _coerce_date(monthly_start)
+    monthly_end = _coerce_date(monthly_end)
+    if monthly_start is not None and monthly_end is not None:
+        monthly_overview = compute_monthly_overview(
+            start_date=monthly_start,
+            end_date=monthly_end,
+        )
+    else:
+        monthly_overview = compute_monthly_overview(reference_date=date)
     month_summary = monthly_overview['summary']
 
     tokens = Token.objects.filter(slot__date=date).select_related('slot__doctor')
@@ -318,23 +334,74 @@ def _compute_daily_trend(end_date, days=7):
     ]
 
 
-def compute_monthly_overview(reference_date=None):
-    """Calendar-month summary; all monthly charts use the same date range and metrics."""
-    reference_date = reference_date or timezone.localdate()
-    month_start = reference_date.replace(day=1)
+def _last_day_of_month(date):
+    if date.month == 12:
+        return date.replace(day=31)
+    return (date.replace(month=date.month + 1, day=1) - timedelta(days=1))
 
-    month_tokens = _booked_tokens_for_range(month_start, reference_date)
+
+def _format_monthly_label(start_date, end_date):
+    """Human-readable label for a monthly overview date range."""
+    last_day = _last_day_of_month(start_date)
+    if (
+        start_date.day == 1
+        and start_date.month == end_date.month
+        and start_date.year == end_date.year
+    ):
+        if end_date == last_day:
+            return start_date.strftime('%B %Y')
+        return f'{start_date.strftime("%B %Y")} (to {end_date.strftime("%d %b")})'
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return f'{start_date.strftime("%d %b")} – {end_date.strftime("%d %b %Y")}'
+    return f'{start_date.strftime("%d %b %Y")} – {end_date.strftime("%d %b %Y")}'
+
+
+def parse_monthly_date_range(monthly_start, monthly_end, today=None):
+    """Validate monthly overview range (max 31 days, end not in the future)."""
+    today = today or timezone.localdate()
+    if not monthly_start and not monthly_end:
+        end_date = today
+        start_date = end_date.replace(day=1)
+        return start_date, end_date, None
+    if not monthly_start or not monthly_end:
+        return None, None, 'Both monthly_start and monthly_end are required.'
+    try:
+        start_date = datetime.strptime(monthly_start, '%Y-%m-%d').date()
+        end_date = datetime.strptime(monthly_end, '%Y-%m-%d').date()
+    except ValueError:
+        return None, None, 'Invalid date format. Use YYYY-MM-DD.'
+    if start_date > end_date:
+        return None, None, 'monthly_start must be on or before monthly_end.'
+    if (end_date - start_date).days > 31:
+        return None, None, 'Date range must not exceed 31 days.'
+    if end_date > today:
+        return None, None, 'monthly_end cannot be in the future.'
+    return start_date, end_date, None
+
+
+def compute_monthly_overview(start_date=None, end_date=None, reference_date=None):
+    """Monthly summary for an inclusive date range (default: calendar month to date)."""
+    today = timezone.localdate()
+    if start_date is not None and end_date is not None:
+        range_start = start_date
+        range_end = end_date
+    else:
+        reference_date = reference_date or today
+        range_start = reference_date.replace(day=1)
+        range_end = reference_date
+
+    month_tokens = _booked_tokens_for_range(range_start, range_end)
     month_completed = _completed_tokens(month_tokens)
     month_no_show_count = _no_show_tokens(month_tokens).count()
 
     wait_times, consult_times = _wait_and_consult_times(month_completed)
     booked_count = month_tokens.count()
     completed_count = month_completed.count()
-    month_revenue = _payment_revenue(month_start, reference_date)
+    month_revenue = _payment_revenue(range_start, range_end)
 
     calendar_series = []
-    d = month_start
-    while d <= reference_date:
+    d = range_start
+    while d <= range_end:
         calendar_series.append(_aggregate_day_metrics(d, label_format='%d %b'))
         d += timedelta(days=1)
 
@@ -368,8 +435,8 @@ def compute_monthly_overview(reference_date=None):
     slot_breakdown = _slot_breakdown(month_tokens)
 
     month_payments = Payment.objects.filter(
-        paid_at__date__gte=month_start,
-        paid_at__date__lte=reference_date,
+        paid_at__date__gte=range_start,
+        paid_at__date__lte=range_end,
         status='paid',
     )
     revenue_by_type = []
@@ -395,9 +462,9 @@ def compute_monthly_overview(reference_date=None):
     peak_day = max(calendar_series, key=lambda r: r['completed']) if calendar_series else None
 
     return {
-        'month_label': month_start.strftime('%B %Y'),
-        'month_start': month_start.isoformat(),
-        'month_end': reference_date.isoformat(),
+        'month_label': _format_monthly_label(range_start, range_end),
+        'month_start': range_start.isoformat(),
+        'month_end': range_end.isoformat(),
         'summary': {
             'total_patients': booked_count,
             'completed_visits': completed_count,
@@ -406,8 +473,8 @@ def compute_monthly_overview(reference_date=None):
             'no_show_rate': round((month_no_show_count / booked_count * 100), 1) if booked_count else 0,
             'total_revenue': round(month_revenue, 2),
             'lab_tests': LabOrder.objects.filter(
-                ordered_at__date__gte=month_start,
-                ordered_at__date__lte=reference_date,
+                ordered_at__date__gte=range_start,
+                ordered_at__date__lte=range_end,
             ).count(),
             'avg_wait_minutes': round(sum(wait_times) / len(wait_times), 1) if wait_times else 0,
             'avg_consult_minutes': round(sum(consult_times) / len(consult_times), 1) if consult_times else 0,

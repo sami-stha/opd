@@ -251,7 +251,13 @@ const API = {
 
     // Admin & sync
     sync() { return this.get('/sync/'); },
-    analytics() { return this.get('/analytics/'); },
+    analytics(opts = {}) {
+        const params = new URLSearchParams();
+        if (opts.monthly_start) params.set('monthly_start', opts.monthly_start);
+        if (opts.monthly_end) params.set('monthly_end', opts.monthly_end);
+        const q = params.toString() ? `?${params.toString()}` : '';
+        return this.get(`/analytics/${q}`);
+    },
     adminDoctors() { return this.get('/admin/doctors/'); },
     adminAddDoctor(d) { return this.post('/admin/doctors/add/', d); },
     adminUpdateDoctor(id, d) { return this.put(`/admin/doctors/${id}/`, d); },

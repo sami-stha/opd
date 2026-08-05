@@ -13,7 +13,12 @@ from core.models import (
     ThrottleLog, Token,
 )
 from core.permissions import STAFF_ROLES, IsAdmin
-from core.services.analytics import compute_kpis, ensure_slot_recommendations, get_recommendations
+from core.services.analytics import (
+    compute_kpis,
+    ensure_slot_recommendations,
+    get_recommendations,
+    parse_monthly_date_range,
+)
 from core.utils import ensure_today_tomorrow_slots, serialize_slot
 from core.services.slot_config import (
     ensure_slot_type_configs,
@@ -454,7 +459,13 @@ def admin_throttle_logs(request):
 @permission_classes([IsAuthenticated, IsAdmin])
 def analytics(request):
     ensure_slot_recommendations()
-    kpis = compute_kpis()
+    monthly_start, monthly_end, range_error = parse_monthly_date_range(
+        request.query_params.get('monthly_start'),
+        request.query_params.get('monthly_end'),
+    )
+    if range_error:
+        return Response({'success': False, 'error': range_error}, status=400)
+    kpis = compute_kpis(monthly_start=monthly_start, monthly_end=monthly_end)
     recommendations = [
         {
             'id': r.id,

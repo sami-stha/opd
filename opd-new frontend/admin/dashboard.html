@@ -248,13 +248,29 @@
                 <p class="panel-subtitle" id="monthlyOverviewLabel">Calendar month performance</p>
               </div>
             </div>
+            <div class="monthly-range-controls" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+              <div class="form-group" style="margin:0; min-width:10rem;">
+                <label class="form-label" for="monthlyMonthPicker">Month</label>
+                <input type="month" id="monthlyMonthPicker" class="form-input" onchange="onMonthlyMonthChange()" />
+              </div>
+              <div class="form-group" style="margin:0; min-width:10rem;">
+                <label class="form-label" for="monthlyStartDate">Start date</label>
+                <input type="date" id="monthlyStartDate" class="form-input" onchange="onMonthlyDateFieldsChange()" />
+              </div>
+              <div class="form-group" style="margin:0; min-width:10rem;">
+                <label class="form-label" for="monthlyEndDate">End date</label>
+                <input type="date" id="monthlyEndDate" class="form-input" onchange="onMonthlyDateFieldsChange()" />
+              </div>
+              <button class="btn btn-primary" type="button" onclick="applyMonthlyRange()">Apply</button>
+            </div>
+            <p id="monthlyRangeHint" class="panel-subtitle" style="margin:0 0 1rem;">Pick a month or choose start/end dates (max 31 days).</p>
             <div class="analytics-hero-grid" id="monthlyHeroGrid"></div>
             <div class="analytics-charts-grid" style="margin-top: 1rem;">
               <div class="analytics-chart-panel full-width">
                 <div class="analytics-chart-header">
                   <div>
-                    <div class="analytics-chart-title">Month-to-Date OPD Activity</div>
-                    <div class="analytics-chart-subtitle">Completed visits, bookings, and daily revenue (calendar month)</div>
+                    <div class="analytics-chart-title">OPD Activity</div>
+                    <div class="analytics-chart-subtitle" id="monthlyActivitySubtitle">Completed visits, bookings, and daily revenue</div>
                   </div>
                 </div>
                 <div class="analytics-chart-wrap tall"><canvas id="monthlyActivityChart"></canvas></div>
@@ -601,9 +617,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/js/icons.js"></script>
     <script src="/js/app.js?v=20260727"></script>
-    <script src="/js/api.js?v=20260727b"></script>
+    <script src="/js/api.js?v=20260805"></script>
     <script>
       let analyticsData = null;
+      let monthlyRangeState = { start: null, end: null };
       const chartInstances = {};
       const CHART_COLORS = {
         primary: '#0B3D5C',
@@ -657,6 +674,105 @@
         }
       }
 
+      function formatDateISO(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+
+      function lastDayOfMonth(year, month) {
+        return new Date(year, month, 0);
+      }
+
+      function getDefaultMonthlyRange() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const y = today.getFullYear();
+        const m = today.getMonth() + 1;
+        return {
+          start: `${y}-${String(m).padStart(2, '0')}-01`,
+          end: formatDateISO(today),
+        };
+      }
+
+      function initMonthlyRangeControls() {
+        const def = getDefaultMonthlyRange();
+        monthlyRangeState = { ...def };
+        const startEl = document.getElementById('monthlyStartDate');
+        const endEl = document.getElementById('monthlyEndDate');
+        const monthEl = document.getElementById('monthlyMonthPicker');
+        if (startEl) startEl.value = def.start;
+        if (endEl) endEl.value = def.end;
+        if (monthEl) monthEl.value = def.start.slice(0, 7);
+      }
+
+      function syncMonthPickerFromDates(start, end) {
+        const monthEl = document.getElementById('monthlyMonthPicker');
+        if (!monthEl || !start || !end) return;
+        const [sy, sm, sd] = start.split('-').map(Number);
+        const [ey, em, ed] = end.split('-').map(Number);
+        if (sd === 1 && sy === ey && sm === em) {
+          monthEl.value = `${sy}-${String(sm).padStart(2, '0')}`;
+          return;
+        }
+        monthEl.value = '';
+      }
+
+      function validateMonthlyRange(start, end) {
+        if (!start || !end) return 'Start and end dates are required.';
+        const s = new Date(`${start}T00:00:00`);
+        const e = new Date(`${end}T00:00:00`);
+        if (s > e) return 'Start date must be on or before end date.';
+        const days = Math.round((e - s) / 86400000);
+        if (days > 31) return 'Date range must not exceed 31 days.';
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (e > today) return 'End date cannot be in the future.';
+        return null;
+      }
+
+      function onMonthlyMonthChange() {
+        const monthEl = document.getElementById('monthlyMonthPicker');
+        const val = monthEl?.value;
+        if (!val) return;
+        const [y, m] = val.split('-').map(Number);
+        const start = `${val}-01`;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const isCurrentMonth = y === today.getFullYear() && m === today.getMonth() + 1;
+        const end = isCurrentMonth
+          ? formatDateISO(today)
+          : formatDateISO(lastDayOfMonth(y, m));
+        const startEl = document.getElementById('monthlyStartDate');
+        const endEl = document.getElementById('monthlyEndDate');
+        if (startEl) startEl.value = start;
+        if (endEl) endEl.value = end;
+        monthlyRangeState = { start, end };
+        applyMonthlyRange();
+      }
+
+      function onMonthlyDateFieldsChange() {
+        const start = document.getElementById('monthlyStartDate')?.value;
+        const end = document.getElementById('monthlyEndDate')?.value;
+        if (start && end) syncMonthPickerFromDates(start, end);
+      }
+
+      async function applyMonthlyRange() {
+        const start = document.getElementById('monthlyStartDate')?.value;
+        const end = document.getElementById('monthlyEndDate')?.value;
+        const err = validateMonthlyRange(start, end);
+        const hint = document.getElementById('monthlyRangeHint');
+        if (err) {
+          if (hint) hint.textContent = err;
+          Toast.show(err, 'error');
+          return;
+        }
+        if (hint) hint.textContent = 'Pick a month or choose start/end dates (max 31 days).';
+        monthlyRangeState = { start, end };
+        await refreshAnalytics();
+      }
+
       function makeChart(id, config) {
         const canvas = document.getElementById(id);
         if (!canvas || typeof Chart === 'undefined') return;
@@ -667,11 +783,14 @@
       function renderMonthlyOverview(data) {
         const m = data.monthly_overview || {};
         const s = m.summary || {};
+        const rangeLabel = m.month_label
+          ? `${m.month_label} (${m.month_start} → ${m.month_end})`
+          : 'Calendar month performance';
         const labelEl = document.getElementById('monthlyOverviewLabel');
-        if (labelEl) {
-          labelEl.textContent = m.month_label
-            ? `${m.month_label} (${m.month_start} → ${m.month_end})`
-            : 'Calendar month performance';
+        if (labelEl) labelEl.textContent = rangeLabel;
+        const activitySub = document.getElementById('monthlyActivitySubtitle');
+        if (activitySub) {
+          activitySub.textContent = `Completed visits, bookings, and daily revenue (${m.month_start || ''} to ${m.month_end || ''})`;
         }
         const heroes = [
           { label: 'Month Patients', value: fmt(s.total_patients), sub: `${s.active_days || 0} active OPD days` },
@@ -1249,7 +1368,13 @@
       }
 
       async function refreshAnalytics() {
-        const res = await API.analytics();
+        const range = monthlyRangeState.start && monthlyRangeState.end
+          ? monthlyRangeState
+          : getDefaultMonthlyRange();
+        const res = await API.analytics({
+          monthly_start: range.start,
+          monthly_end: range.end,
+        });
         if (!res.success) {
           Toast.show(res.error || "Failed to load analytics", "error");
           return;
@@ -1563,6 +1688,8 @@
           .charAt(0)
           .toUpperCase();
 
+        initMonthlyRangeControls();
+
         refreshAnalytics();
         PollManager.start('admin', refreshAnalytics, 10000);
 
@@ -1583,6 +1710,9 @@
 
       window.showSection = showSection;
       window.refreshAnalytics = refreshAnalytics;
+      window.applyMonthlyRange = applyMonthlyRange;
+      window.onMonthlyMonthChange = onMonthlyMonthChange;
+      window.onMonthlyDateFieldsChange = onMonthlyDateFieldsChange;
       window.addDoctor = addDoctor;
       window.editDoctor = editDoctor;
       window.updateMaxTokens = updateMaxTokens;

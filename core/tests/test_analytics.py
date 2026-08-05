@@ -1,12 +1,18 @@
 """Analytics KPI and chart data tests."""
 from decimal import Decimal
 
+from datetime import timedelta
+
 from django.core.management import call_command
 from django.utils import timezone
 
 from core import constants as C
 from core.models import PharmacyQueueEntry
-from core.services.analytics import compute_daily_analytics, compute_kpis
+from core.services.analytics import (
+    compute_daily_analytics,
+    compute_kpis,
+    parse_monthly_date_range,
+)
 from core.tests.base import OPDTestCase
 from core.views.admin_api import analytics as analytics_view
 
@@ -187,3 +193,49 @@ class AnalyticsWorkflowTests(OPDTestCase):
             ).count(),
             1,
         )
+
+    def test_parse_monthly_date_range_defaults_to_current_month(self):
+        start, end, err = parse_monthly_date_range(None, None, today=self.today)
+        self.assertIsNone(err)
+        self.assertEqual(start, self.today.replace(day=1))
+        self.assertEqual(end, self.today)
+
+    def test_parse_monthly_date_range_rejects_long_ranges(self):
+        start = self.today - timedelta(days=40)
+        _, _, err = parse_monthly_date_range(
+            start.isoformat(),
+            self.today.isoformat(),
+            today=self.today,
+        )
+        self.assertEqual(err, 'Date range must not exceed 31 days.')
+
+    def test_monthly_overview_custom_date_range(self):
+        past = self.today - timedelta(days=10)
+        past_slot = self.create_slot(self.doctor, 'morning', date=past)
+        token = self.create_token(past_slot, status=C.COMPLETED, phone='9800888999')
+        token.refresh_from_db()
+
+        kpis = compute_kpis(
+            monthly_start=past.isoformat(),
+            monthly_end=self.today.isoformat(),
+        )
+        overview = kpis['monthly_overview']
+        self.assertEqual(overview['month_start'], past.isoformat())
+        self.assertEqual(overview['month_end'], self.today.isoformat())
+        self.assertGreaterEqual(overview['summary']['completed_visits'], 1)
+
+    def test_analytics_api_accepts_monthly_range_params(self):
+        start = self.today.replace(day=1).isoformat()
+        end = self.today.isoformat()
+        path = f'/api/core/analytics/?monthly_start={start}&monthly_end={end}'
+        api_res = self.api_get(analytics_view, path, self.admin)
+        self.assertTrue(api_res.data['success'])
+        self.assertEqual(api_res.data['monthly_overview']['month_start'], start)
+        self.assertEqual(api_res.data['monthly_overview']['month_end'], end)
+
+    def test_analytics_api_rejects_invalid_monthly_range(self):
+        start = (self.today - timedelta(days=40)).isoformat()
+        path = f'/api/core/analytics/?monthly_start={start}&monthly_end={self.today.isoformat()}'
+        api_res = self.api_get(analytics_view, path, self.admin)
+        self.assertFalse(api_res.data['success'])
+        self.assertEqual(api_res.status_code, 400)
