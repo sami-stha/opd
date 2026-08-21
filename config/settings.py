@@ -26,7 +26,7 @@ ESEWA_SECRET_KEY = config('ESEWA_SECRET_KEY', default='8gBm/:&EnhH.1/q')
 ESEWA_UAT = config('ESEWA_UAT', default=True, cast=bool)
 ESEWA_SKIP_SIGNATURE_VERIFY = config('ESEWA_SKIP_SIGNATURE_VERIFY', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', "opd.onrender.com",]
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', "opd-kkw3.onrender.com",]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
