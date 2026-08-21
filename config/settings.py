@@ -25,7 +25,7 @@ ESEWA_SECRET_KEY = config('ESEWA_SECRET_KEY', default='8gBm/:&EnhH.1/q')
 ESEWA_UAT = config('ESEWA_UAT', default=True, cast=bool)
 ESEWA_SKIP_SIGNATURE_VERIFY = config('ESEWA_SKIP_SIGNATURE_VERIFY', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', "opd.onrender.com",]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -107,6 +108,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -150,3 +152,14 @@ if os.environ.get('DJANGO_RUNNING_TESTS') == '1':
     MIGRATION_MODULES = _DisableMigrations()
 
     ESEWA_SKIP_SIGNATURE_VERIFY = True
+
+    import os
+import dj_database_url
+
+DATABASES = {
+    "default": dj_database_url.config(
+        default=os.environ.get("DATABASE_URL")
+    )
+}
+
+DEBUG = os.environ.get("DEBUG", "False") == "True"
